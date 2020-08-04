@@ -33,6 +33,8 @@ There are other variants of this idea; that are modern browser/web view integrat
 ## Selfie 
 <img src="assets/Selfie.png.png">
 
+*Space Bugs not included*
+
 ## Related Projects
 
 There is also a Direct2D player application.
