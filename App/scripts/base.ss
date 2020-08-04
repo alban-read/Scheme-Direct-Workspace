@@ -275,26 +275,14 @@
 (define format-scite
   (lambda () (eval->pretty (get-input-ed))))
 				 
-;;;
-
-(define set-windows-layout
-  (lambda (n)
-    ((foreign-procedure "WindowLayout" (int) ptr) n)))
-
-(define set-repaint-timer
-  (lambda (n)
-    ((foreign-procedure "set_repaint_timer" (int) ptr) n)))
-
-
+ 
 ;; delay, period, mode (mode=0,1)  f
 ;; runs every_step after d ms; every m ms.
 (define set-every-function
   (lambda (d p m f)
     ((foreign-procedure "every" (int int int ptr) ptr) d p m f)))
 		
-(define set-every-timer
- (lambda (d p m)
-	(set-every-function d p m  every_step )))
+
 	
 ;; run p after n 
 (define after 
@@ -302,390 +290,153 @@
 		  ((foreign-procedure "after" (int ptr) ptr) d n)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; simple graphics (some gdi plus commands)
-
-(define update-graphics
+ 
+(define set-repaint-timer
   (lambda (n)
-    ((foreign-procedure "graphicsUpdate" (int) ptr) n)))
+    ((foreign-procedure "set_repaint_timer" (int) ptr) n)))
+
+(define set-every-function
+  (lambda (d p m f)
+    ((foreign-procedure "every" (int int int ptr) ptr) d p m f)))
+		
+(define stop-every
+	(lambda()
+	 (set-every-function 0 0 0 '())))		
 	
-	
-(define activate-graphics
-  (lambda ()
-    ((foreign-procedure "graphicsActivate" () ptr))))
-	
-(define show 
-(lambda () 
-	(gswap 1)
-	(update-graphics 0)))
+;; run p after n 
+(define after 
+	(lambda (d n) 
+		  ((foreign-procedure "after" (int ptr) ptr) d n)))
 
-(define clr
- (lambda (x y)
-   ((foreign-procedure "CLRS"
-    (int int ) ptr) x y)))
+ 
+;; direct 2d
 
-(define clrg
- (lambda (x y)
-   ((foreign-procedure "CLRG"
-    (int int ) ptr) x y)))
-
-(define save-as-png
- (lambda (f)
-   ((foreign-procedure "SAVEASPNG"
-    (string) ptr) f)))
-
-(define save-as-jpeg
- (lambda (f)
-   ((foreign-procedure "SAVEASJPEG"
-    (string) ptr) f)))
-
-(define save-to-clipboard
- (lambda (f)
-   ((foreign-procedure "SAVETOCLIPBOARD"
-    (string) ptr) f)))
-
-(define pen-width
- (lambda (w)
-   ((foreign-procedure "PENWIDTH"
-    (float) ptr) w)))
-
-(define fill
- (lambda (a r g b)
-   ((foreign-procedure "SOLIDBRUSH"
-    (int int int int) ptr) a r g b)))
-	
-(define texture
- (lambda (i)
-   ((foreign-procedure "SETTEXTUREBRUSH"
-    (void*) ptr) i)))
-
-(define make-texture
- (lambda (i)
-   ((foreign-procedure "MAKETEXTUREBRUSH"
-    (void*) int) i)))
-
-(define clear-all-textures
+(define identity
  (lambda ()
-   ((foreign-procedure "clear_all_textures"
-    () ptr) )))
+   ((foreign-procedure "d2d_matrix_identity"
+    () ptr))))
+ 
+(define rotate
+ (lambda (a x y)
+   ((foreign-procedure "d2d_matrix_rotate"
+    (float float string) ptr) a x y)))
+
+(define show
+ (lambda ( n)
+   ((foreign-procedure "d2d_show"
+    (int) ptr) n)))
 	
-(define hatch
- (lambda (i a r g b a0 r0 g0 b0 )
-   ((foreign-procedure "SETHATCHBRUSH"
-    (int
-	 int int int int
-	 int int int int ) ptr) 
-	 i a r g b a0 r0 g0 b0 )))
+ 
+(define release
+ (lambda ()
+   ((foreign-procedure "d2d_release"
+    () ptr) )))
 
-(define gradient
- (lambda (x y w h a r g b a0 r0 g0 b0 angle z )
-   ((foreign-procedure "GRADIENTBRUSH"
-    (int int int int
-	 int int int int
-	 int int int int 
-	 double boolean) ptr) 
-	 x y w h a r g b a0 r0 g0 b0 angle z)))
+(define render
+ (lambda (x y)
+   ((foreign-procedure "d2d_render"
+    (float float) ptr) x y)))
+ 
 
-(define gradient-shape
- (lambda (shape focus scale)
-   ((foreign-procedure "GRADIENTSHAPE"
-    (string float float ) ptr) 
-	 shape focus scale)))
+(define font
+ (lambda (face size)
+   ((foreign-procedure "d2d_set_font"
+    (string float) ptr) face size)))
 
-(define paper
- (lambda (a r g b)
-   ((foreign-procedure "PAPER"
-    (int int int int) ptr) a r g b)))
+(define image-size
+ (lambda (w h)
+   ((foreign-procedure "d2d_image_size"
+    (int int) ptr) w h)))
+	
+(define set-pen-width
+ (lambda (w)
+   ((foreign-procedure "d2d_set_stroke_width"
+    (float) ptr) w)))
+	
+(define write-text
+ (lambda (x y s)
+   ((foreign-procedure "d2d_write_text"
+    (float float string) ptr) x y s)))
+
+
+(define draw-line
+ (lambda (x y x1 y1)
+   ((foreign-procedure "d2d_line"
+    (float float float float) ptr) x y x1 y1)))
 
 (define draw-rect
  (lambda (x y w h)
-   ((foreign-procedure "DRAWRECT"
-    (int int int int) ptr) x y w h)))
-
-(define fill-rect
- (lambda (x y w h)
-   ((foreign-procedure "FILLSOLIDRECT"
-    (int int int int) ptr) x y w h)))
-	
-(define brush-rect
- (lambda (x y w h)
-   ((foreign-procedure "BRUSHRECT"
-    (int int int int) ptr) x y w h)))
-	
-(define rect-blit 
- (lambda (id x y w h )
-   ((foreign-procedure "BRUSHRECTID"
-    (int int int int int) ptr) id x y w h  )))
-
-
-(define rfill-rect
- (lambda (x y w h)
-   ((foreign-procedure "REALFILLSOLIDRECT"
+   ((foreign-procedure "d2d_rectangle"
     (float float float float) ptr) x y w h)))
-
-(define gradient-rect
- (lambda (x y w h)
-   ((foreign-procedure "FILLGRADIENTRECT"
-    (int int int int) ptr) x y w h)))
-
-(define hatch-rect
- (lambda (x y w h)
-   ((foreign-procedure "FILLHATCHRECT"
-    (int int int int) ptr) x y w h)))
 
 (define draw-ellipse
  (lambda (x y w h)
-   ((foreign-procedure "DRAWELLIPSE"
-    (int int int int) ptr) x y w h)))
+   ((foreign-procedure "d2d_ellipse"
+    (float float float float) ptr) x y w h)))
 
 (define fill-ellipse
  (lambda (x y w h)
-   ((foreign-procedure "FILLSOLIDELLIPSE"
-    (int int int int) ptr) x y w h)))
+   ((foreign-procedure "d2d_fill_ellipse"
+    (float float float float) ptr) x y w h)))
 
-(define brush-ellipse
+(define fill-rect
  (lambda (x y w h)
-   ((foreign-procedure "BRUSHELLIPSE"
-    (int int int int) ptr) x y w h)))
+   ((foreign-procedure "d2d_fill_rectangle"
+    (float float float float) ptr) x y w h)))
 
-(define gradient-ellipse
- (lambda (x y w h)
-   ((foreign-procedure "FILLGRADIENTELLIPSE"
-    (int int int int) ptr) x y w h)))
-
-(define hatch-ellipse
- (lambda (x y w h)
-   ((foreign-procedure "FILLHATCHELLIPSE"
-    (int int int int) ptr) x y w h)))
-
-(define draw-arc
- (lambda (x y w h i j)
-   ((foreign-procedure "DRAWARC"
-    (int int int int int int) ptr) x y w h i j)))
-
-(define draw-pie
- (lambda (x y w h i j)
-   ((foreign-procedure "DRAWPIE"
-    (int int int int int int) ptr) x y w h i j)))
-
-(define fill-pie
- (lambda (x y w h i j)
-   ((foreign-procedure "FILLSOLIDPIE"
-    (int int int int int int) ptr) x y w h i j)))
-
-(define gradient-pie
- (lambda (x y w h i j)
-   ((foreign-procedure "FILLGRADIENTPIE"
-    (int int int int int int) ptr) x y w h i j)))
-
-(define hatch-pie
- (lambda (x y w h i j)
-   ((foreign-procedure "FILLHATCHPIE"
-    (int int int int int int) ptr) x y w h i j)))
-
-(define draw-line
- (lambda (x y x0 y0)
-   ((foreign-procedure "DRAWLINE"
-    (int int int int) ptr) x y x0 y0)))
-
-(define gradient-line
- (lambda (x y x0 y0)
-   ((foreign-procedure "DRAWGRADIENTLINE"
-    (int int int int) ptr) x y x0 y0)))
-
-(define fill-string
- (lambda (x y s)
-   ((foreign-procedure "DRAWSTRING"
-    (int int string) ptr) x y s)))
-
-(define gradient-string
- (lambda (x y s)
-   ((foreign-procedure "DRAWGRADIENTSTRING"
-    (int int string) ptr) x y s)))
-
-(define set-pixel
- (lambda (x y)
-   ((foreign-procedure "SETPIXEL"
-    (int int) ptr) x y)))
-
-(define rset-pixel
- (lambda (x y)
-   ((foreign-procedure "RSETPIXEL"
-    (float float) ptr) x y)))
-
-(define colour
- (lambda (a r g b)
-   ((foreign-procedure "COLR"
-    (int int int int) ptr) a r g b)))
-
-(define gmode
- (lambda (m)
-   ((foreign-procedure "GRMODE"
-    (int ) ptr) m)))
-
-(define font-size
- (lambda (s)
-   ((foreign-procedure "SETFONTSIZE"
-    (int) ptr) s)))
-
-(define fast-graphics
- (lambda ()
-   ((foreign-procedure "QUALITYFAST"
-    () ptr))))
-
-(define smooth-graphics
- (lambda ()
-   ((foreign-procedure "QUALITYHIGH"
-    () ptr))))
-
-(define antialias-graphics
- (lambda ()
-   ((foreign-procedure "QUALITYANTIALIAS"
-    () ptr))))
-
-(define gswap
- (lambda (n)
-   ((foreign-procedure "GSWAP"
-    (int) ptr) n )))
-
-(define gflip
- (lambda (m)
-   ((foreign-procedure "FLIP"
-    (int ) ptr) m)))
-
-(define reset-matrix
- (lambda ()
-   ((foreign-procedure "MATRIXRESET"
-    () ptr))))
-
-(define invert-matrix
- (lambda ()
-   ((foreign-procedure "MATRIXINVERT"
-    () ptr))))
-
-(define scale
- (lambda (x y)
-   ((foreign-procedure "MATRIXSCALE"
-    (float float) ptr) x y )))
-
-
-(define translate
- (lambda (x y)
-   ((foreign-procedure "MATRIXTRANSLATE"
-    (float float) ptr) x y)))
-
-(define shear
- (lambda (x y)
-   ((foreign-procedure "MATRIXSHEAR"
-    (float float) ptr) x y)))
-
-(define rotate
- (lambda (a)
-   ((foreign-procedure "MATRIXROTATE"
-    (float) ptr) a )))
-
-(define rotate-at
- (lambda (x y a)
-   ((foreign-procedure "MATRIXROTATEAT"
-    (int int float) ptr) x y a )))
+ (define fill-colour
+ (lambda (r g b a)
+   ((foreign-procedure "d2d_fill_color"
+    (float float float float) ptr) r g b a)))
 	
-;; dangerous use of void* to bitmaps and images follows.
 	
-(define clone-image
- (lambda (i)
-   ((foreign-procedure "CLONEIMAGE"
-    (void* ) void*) i)))	
+(define clear-image
+ (lambda (r g b a)
+   ((foreign-procedure "d2d_clear"
+    (float float float float) ptr) r g b a)))	
+	
+(define line-colour
+ (lambda (r g b a)
+   ((foreign-procedure "d2d_color"
+    (float float float float) ptr) r g b a)))
+	
+ 
+(define load-sprites
+ (lambda (s n)
+   ((foreign-procedure "d2d_load_sprites"
+    (string int) ptr) s n)))
+
+;;  (int n, float sx, float sy, float sw, float sh, 
+;;	float dx, float dy, float dw, float dh)
+(define draw-sprite
+ (lambda (n dx dy)
+   ((foreign-procedure "d2d_render_sprite"
+    (int float float  ) 
+		ptr) n dx dy)))	
 		
+(define draw-scaled-rotated-sprite
+ (lambda (n dx dy s a)
+   ((foreign-procedure "d2d_render_sprite_rotscale"
+    (int float float float float  ) 
+		ptr) n dx dy s a)))	
 	
-(define clone-resized-bitmap
- (lambda (b w h )
-   ((foreign-procedure "RESIZEDCLONEDBITMAP"
-    (void* int int) void*) b w h)))	
-	
-(define clone-resized-image
- (lambda (i w h )
-   ((foreign-procedure "RESIZEDCLONEIMAGE"
-    (void* int int) void*) i w h)))		
-	
-(define clone-rotated-image
- (lambda (a i)
-   ((foreign-procedure "ROTATEDCLONEDIMAGE"
-    (int  void*) void*) a i)))	
-	
-(define draw-image
- (lambda (i x y )
-   ((foreign-procedure "IMAGETOSURFACE"
-    (void* int int) ptr) i x y)))			
-	
-(define draw-rotated-image
- (lambda (a i x y )
-   ((foreign-procedure "ROTATEDIMAGETOSURFACE"
-    (void*  int int int) ptr) a i x y)))			
-	
-(define draw-scaled-image
- (lambda (s i x y )
-   ((foreign-procedure "SCALEDIMAGETOSURFACE"
-    (int void* int int) ptr) s i x y)))			
-		
-(define draw-scaled-rotated-image
- (lambda (s a i x y )
-   ((foreign-procedure "SCALEDROTATEDIMAGETOSURFACE"
-    (int int void*  int int) ptr) s a i x y)))	
-
-(define load-to-background
- (lambda (f x y )
-   ((foreign-procedure "LOADTOSURFACE"
-    (string int int) ptr) f x y)))	
-
-(define free-bitmap
- (lambda (b)
-   ((foreign-procedure "FREESURFACE"
-    (void*) ptr) b)))		
-	
-(define free-image
- (lambda (b)
-   ((foreign-procedure "FREEIMAGE"
-    (void*) ptr) b)))		
-	
-
-(define activate-bitmap
- (lambda (b)
-   ((foreign-procedure "ACTIVATESURFACE"
-    (void*) ptr) b)))		
-
-(define make-new-bitmap
- (lambda (w h)
-   ((foreign-procedure "MAKESURFACE"
-    (int int) void*) w h)))	
-	
-(define load-image
- (lambda (f )
-   ((foreign-procedure "LOADIMAGE"
-    (string) void*) f)))	
-
-(define get-active
- (lambda ()
-   ((foreign-procedure "get_surface"
-    () void*) )))	
-
-
-(define get-texture 
- (lambda ()
-   ((foreign-procedure "get_texture_brush"
-    () void*) )))	
-	
-	
-(define set-texture 
- (lambda (b)
-   ((foreign-procedure "set_texture_brush"
-    (void*) ptr) b)))		
-
+(define render-sprite
+ (lambda (n dx dy dh dw
+            sx sy sh sw scale)
+   ((foreign-procedure "d2d_render_sprite_sheet"
+    (int float float float float 
+		 float float float float
+		 float) 
+		ptr) n dx dy dh dw
+			sx sy sh sw scale)))		
+			
+			
 ;; used to track keys in graphics window
 (define graphics-keys
  (lambda ()
    ((foreign-procedure "graphics_keys"
     () ptr))))
 	
-
 	
 	
 ;;; simple browser pane

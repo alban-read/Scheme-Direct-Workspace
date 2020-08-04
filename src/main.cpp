@@ -87,6 +87,11 @@ using namespace Gdiplus;
 ptr every(int delay, int period, int mode, ptr p);
 ptr after(int delay, ptr p);
 
+
+namespace Graphics2D {
+	void add_commands();
+}
+
 namespace Text {
 	extern ptr utf8_string_separated_to_list(char* s, const char sep);
 	extern std::wstring Widen(const std::string& in);
@@ -1564,7 +1569,8 @@ DWORD WINAPI execstartup(LPVOID cmd)
 		Sforeign_symbol("set_repaint_timer", static_cast<ptr>(set_repaint_timer));
 		Sforeign_symbol("GetFullPath", static_cast<ptr>(GetFullPath));
 
-		_init_graphics();
+		Graphics2D::add_commands();
+
 		Sforeign_symbol("graphics_keys", static_cast<ptr>(graphics_keys));
 
 		Sforeign_symbol("every", static_cast<ptr>(every));

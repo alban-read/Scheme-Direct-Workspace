@@ -63,7 +63,7 @@ A program is either a Script in Scheme or a C++ application with Scheme scriptin
 
 ##### Composition of the app
 
-This App uses Win32cpp a Win32 library (it is 64 bit; the 32 is the name of the Windows API); this App includes only view related things; like the scintilla text editor; the GDI+ graphics pane; and the windows browser pane.
+This App uses Win32cpp a Win32 library (it is 64 bit; the 32 is the name of the Windows API); this App includes only view related things; like the scintilla text editor; the Direct2D graphics pane; and the windows browser pane.
 
 Chez Scheme designed for the terminal; is composed of an application; a shared library kernel; and boot files (containing compiled scheme code and data.)
 
@@ -201,11 +201,11 @@ Or if you are in business 'stop wasting money.'
 
 ### Latest state: release note
 
-July 2020 minimal edition.
+August 2020 minimal Direct2D edition.
 
+- This version uses Direct2D for hardware (GPU) accelerated graphics.
 - Enhanced the graphics image pane.
 - Added timers for animations.
-
 -  Tidied up a bit.
 -  Ripped out reams of library code; including a giant DLL glue library full of things only I am interested in.
 -  Redirected more functions that expect a terminal (tracing, timing, statistics.)

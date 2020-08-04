@@ -26,10 +26,11 @@ extern char* noncezero;
  
  
 
-namespace GlobalGraphics {
-	Gdiplus::Bitmap* __stdcall get_display_surface(void);
+namespace Graphics2D {
+	void onPaint(HWND hWnd); 
 	void swap_buffers(int n);
-	int graphics_mode();
+	void CreateFactory();
+	void step(ptr lpParam);
 }
 
 
@@ -156,8 +157,6 @@ bool timeount_on_script_lock(const int turns)
 }
 
  
- 
-
 
 std::deque<std::string> commands;
 
@@ -335,10 +334,8 @@ VOID CALLBACK run_every(PVOID lpParam, BOOLEAN TimerOrWaitFired) {
 
 	WaitForSingleObject(g_script_mutex, INFINITE);
 	try {
-		// the procedure may have changed.
-		if (Sprocedurep(lpParam)) {
-			Scall0(lpParam);
-		}
+
+		Graphics2D::step(lpParam);
 	}
 	catch (const CException& e)
 	{
@@ -348,8 +345,8 @@ VOID CALLBACK run_every(PVOID lpParam, BOOLEAN TimerOrWaitFired) {
 		return;
 	}
 	ReleaseMutex(g_script_mutex);
-	// copy active surface to display surface.
-	GlobalGraphics::swap_buffers(swap_mode);
+	Graphics2D::swap_buffers(swap_mode);
+ 
 
 }
 
@@ -1160,6 +1157,9 @@ LRESULT CViewImage::WndProc(UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch (uMsg)
 	{
 
+	case WM_CREATE:
+		Graphics2D::CreateFactory();
+
 	case WM_KEYDOWN:
 		graphics_keypressed.ctrl = false;
 		graphics_keypressed.left = false;
@@ -1193,136 +1193,24 @@ LRESULT CViewImage::WndProc(UINT uMsg, WPARAM wParam, LPARAM lParam)
 		}
 		break;
 	 
-	case WM_TIMER:
-	// fast display path activated by the timer
-		if (GlobalGraphics::get_display_surface() != nullptr) {
 
-			const auto cw = GetClientRect().Width();
-			const auto ch = GetClientRect().Height();
-			const auto h = GlobalGraphics::get_display_surface()->GetHeight();
-			const auto w = GlobalGraphics::get_display_surface()->GetWidth();
-			Gdiplus::Graphics g(hdc);
-			g.SetCompositingMode(Gdiplus::CompositingModeSourceCopy);
-			g.SetCompositingQuality(Gdiplus::CompositingQualityHighSpeed);
-			g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-			g.SetSmoothingMode(Gdiplus::SmoothingModeNone);
-			g.SetInterpolationMode(Gdiplus::InterpolationModeDefault);
-			WaitForSingleObject(g_image_rotation_mutex, INFINITE);
-			g.DrawImage(GlobalGraphics::get_display_surface(), 5, 5, w, h);
-			ReleaseMutex(g_image_rotation_mutex);
-		}
-		break;
 	case WM_PAINT:
+	{
+		HWND hWnd = GetHwnd();
+		Graphics2D::onPaint(hWnd);
+		return TRUE;
+	}
+	break;
+
+	case WM_TIMER:
 	case WM_SHOWWINDOW:
 	case WM_SIZE:
 	case WM_ACTIVATE:
 	case WM_WINDOWPOSCHANGED:
-	{
-		// display background image; or hatch; behind our image
-		int _graphics_mode = GlobalGraphics::graphics_mode();
-		auto display_surface = GlobalGraphics::get_display_surface();
-		if (display_surface != nullptr) {
-
-			const auto cw = GetClientRect().Width();
-			const auto ch = GetClientRect().Height();
-
-
-			if (previous_ch != ch || previous_ch != ch) {
-				if (image_view_bitmap != nullptr) {
-					delete image_view_bitmap;
-					image_view_bitmap = nullptr;
-
-				}
-			}
-
-			if (image_view_bitmap == nullptr) {
-				image_view_bitmap = new Gdiplus::Bitmap(cw, ch, PixelFormat32bppRGB);
-			}
-
-			previous_cw = cw;
-			previous_ch = ch;
-
-			// g2 can draw onto image_view.
-			Gdiplus::Graphics g2(image_view_bitmap);
-
-			const auto h = display_surface->GetHeight();
-			const auto w = display_surface->GetWidth();
-
-			// if not in a fill mode have a border to draw.
-			if (_graphics_mode != 4 ) {
-				Gdiplus::Brush* brush = new Gdiplus::HatchBrush(Gdiplus::HatchStyle::HatchStyleLargeCheckerBoard,
-					Gdiplus::Color::DarkGray, Gdiplus::Color::LightGray);
-				g2.FillRectangle(brush, 0, 0, cw, ch);
-				delete brush;
-			}
-
-			Gdiplus::Graphics g(hdc);
-
-			WaitForSingleObject(g_image_rotation_mutex, INFINITE);
-		
-			switch (_graphics_mode) {
-			case 0:
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 5, 5, w, h);
-				break;
-			case 1: // 1:2
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 5, 5, w / 2, h / 2);
-				break;
-			case 2: // 1:4
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 5, 5, w / 4, h / 4);
-				break;
-			case 3: // 2:1
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 5, 5, w * 2, h * 2);
-				break;
-			case 4: // Fill direct to hdc window.
-				g.DrawImage(display_surface, 1, 1, cw - 2, ch - 2);
-				break;
-			case 5: // 2:3
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 1, 1, w * 2 / 3, h * 2 / 3);
-				break;
-			case 6: // 3:4
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 1, 1, w * 3 / 4, h * 3 / 4);
-				break;
-			case 7: // 3:2
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 1, 1, w * 3 / 2, h * 3 / 2);
-				break;
-			case 8: // 1:1 - faster
-				g2.DrawRectangle(&pen_black, 0, 0, cw - 1, ch - 1);
-				g2.DrawImage(display_surface, 1, 1, w * 3 / 2, h * 3 / 2);
-				break;
-			}
-			ReleaseMutex(g_image_rotation_mutex);
-			if (_graphics_mode != 4 ) {
-				// draw third buffer 
-				g.DrawImage(image_view_bitmap, 0, 0, cw, ch);
-			}
-			
-		}
-		else {
-
-			//// just a nice hatch style for the backdrop
-			const auto cw = GetClientRect().Width();
-			const auto ch = GetClientRect().Height();
-			Gdiplus::Pen black_pen(Gdiplus::Color::Black, 1);
-			Gdiplus::Brush* brush = new Gdiplus::HatchBrush(Gdiplus::HatchStyle::HatchStyleLargeCheckerBoard,
-				Gdiplus::Color::DarkGray, Gdiplus::Color::LightGray);
-			Gdiplus::Graphics g(hdc);
-			g.FillRectangle(brush, 0, 0, cw, ch);
-			g.DrawRectangle(&black_pen, 0, 0, cw - 1, ch - 1);
-
-			delete brush;
-		}
-		break;
-	}
+	 
 
 	case WM_ERASEBKGND:
-		return FALSE;
+		return TRUE;
 	default: ;
 	}
 
@@ -1338,60 +1226,7 @@ BOOL CViewImage::OnCommand(WPARAM wParam, LPARAM lParam)
 
 	switch (LOWORD(wParam))
 	{
-
-		/*case ID_GRAPHICS_TOCLIPBOARD:
-			ViewToClipBoard(this);
-			break;
-
-		case ID_GRAPHICVIEW_CLEAR:
-			this->setBackground(NULL);
-			this->Invalidate();
-
-		case ID_SIZE_SCALE_DOUBLE:
-			this->setMode(3);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_FULL:
-			this->setMode(0);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_HALF:
-			this->setMode(1);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_QUARTER:
-			this->setMode(2);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_FILLDISPLAY:
-			this->setMode(4);
-			this->Invalidate();
-			break;
-
-
-		case ID_GRAPHICVIEW_REFRESH:
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_SCALE3:
-			this->setMode(5);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_SCALE4:
-			this->setMode(6);
-			this->Invalidate();
-			break;
-
-		case ID_SIZE_SCALE5:
-			this->setMode(7);
-			this->Invalidate();
-			break;
-	*/
+ 
 	default: ;
 	}
 	return true;
@@ -1409,17 +1244,7 @@ void CViewImage::OnInitialUpdate()
 {
 	const auto h = this->GetHwnd();
 	image_hwnd = h;
-	const auto dc = this->GetDC();
-	const auto cw = GetClientRect().Width();
-	const auto ch = GetClientRect().Height();
-	Gdiplus::Pen black_pen(Gdiplus::Color::Black, 1);
-	Gdiplus::Brush* brush = new Gdiplus::HatchBrush(Gdiplus::HatchStyle::HatchStyleLargeCheckerBoard,
-	                                                Gdiplus::Color::DarkGray, Gdiplus::Color::LightGray);
-	Gdiplus::Graphics g(dc.GetHDC());
-	g.FillRectangle(brush, 0, 0, cw, ch);
-	g.DrawRectangle(&black_pen, 0, 0, cw - 1, ch - 1);
-
-	delete brush;
+ 
 }
 
 

@@ -2,6 +2,20 @@
 #include "scheme.h"
 #include <gdiplus.h>
 #include <string>
+#include <d2d1.h>
+#include <dwrite.h>
+#include <wincodec.h>
+#include <functional>
+#include <chrono>
+#include <future>
+ 
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
+extern "C" void appendTranscriptNL(char* s);
+#pragma comment(lib, "mfreadwrite.lib")
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfuuid")
 
 #define WinGetObject GetObjectW
 #define WinSendMessage SendMessageW
@@ -10,6 +24,34 @@
 #define CALL0(who) Scall0(Stop_level_value(Sstring_to_symbol(who)))
 #define CALL1(who, arg) Scall1(Stop_level_value(Sstring_to_symbol(who)), arg)
 #define CALL2(who, arg, arg2) Scall2(Stop_level_value(Sstring_to_symbol(who)), arg, arg2)
+ 
+
+template <class callable, class... arguments>
+void later(int after, bool async, callable f, arguments&&... args) {
+	std::function<typename std::result_of < callable(arguments...)>::type() > task(std::bind(std::forward<callable>(f), std::forward<arguments>(args)...));
+
+	if (async) {
+		std::thread([after, task]() {
+			std::this_thread::sleep_for(std::chrono::milliseconds(after));
+			task();
+			}).detach();
+	}
+	else {
+		std::this_thread::sleep_for(std::chrono::milliseconds(after));
+		task();
+	}
+}
+
+template <class T> void SafeRelease(T** ppT)
+{
+	if (*ppT)
+	{
+		(*ppT)->Release();
+		*ppT = NULL;
+	}
+}
+
+#define bank_size 512
 
 
 namespace Text
@@ -1995,1243 +2037,6 @@ Gdiplus::Bitmap* temp_surface = nullptr;
 int _graphics_mode;
 HANDLE g_image_rotation_mutex;
 
-
-namespace GlobalGraphics
-{
-	using namespace Gdiplus;
-
-	const wchar_t font_face[128] = L"Calibri";
-	int font_size = 8;
-	int font_hinting = Gdiplus::TextRenderingHintAntiAliasGridFit;
-	Gdiplus::SolidBrush* solid_brush = nullptr;
-	Gdiplus::SolidBrush* paper_brush = nullptr;
-	Gdiplus::HatchBrush* hatch_brush = nullptr;
-	Gdiplus::TextureBrush* texture_brush = nullptr;
-	Gdiplus::TextureBrush* tiled_texture_brush = nullptr;
-	Gdiplus::LinearGradientBrush* gradient_brush = nullptr;
-	Gdiplus::Color foreground_colour;
-	Gdiplus::Matrix* transform_matrix = new Gdiplus::Matrix();
-	Gdiplus::SmoothingMode quality_mode = Gdiplus::SmoothingModeHighQuality;
-	Gdiplus::Region* clip_region;
-	float _pen_width = static_cast<float>(1.2);
-
-
-	// our table of textures
-	const int textures_max = 1024;
-	void* textures[textures_max];
-	void init_textures()
-	{
-		for (int i = 0; i < textures_max; i++)
-		{
-			textures[i] = nullptr;
-		}
-	}
-
-	int add_texture(void* d)
-	{
-		for (auto i = 0; i < textures_max; i++)
-		{
-			if (textures[i] == nullptr)
-			{
-				textures[i] = d;
-				return i;
-			}
-		}
-		return 0;
-	}
-	extern "C" __declspec(dllexport) ptr isTexture(void* d)
-	{
-		for (auto i = 0; i < textures_max; i++)
-		{
-			if (textures[i] == d)
-			{
-				return Strue;
-			}
-		}
-		return Sfalse;
-	}
-
-	extern "C" __declspec(dllexport) void Destroy_texture(void* d)
-	{
-		for (auto i = 0; i < textures_max; i++)
-		{
-			if (textures[i] == d)
-			{
-				delete static_cast<Gdiplus::TextureBrush * > (d);
-				textures[i] = nullptr;
-				return;
-			}
-		}
-		return;
-	}
-
-	extern "C" __declspec(dllexport) ptr QUALITYHIGH()
-	{
-		quality_mode = Gdiplus::SmoothingModeHighQuality;
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr QUALITYFAST()
-	{
-		quality_mode = Gdiplus::SmoothingModeHighSpeed;
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr QUALITYANTIALIAS()
-	{
-		quality_mode = Gdiplus::SmoothingModeAntiAlias;
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXRESET()
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Reset();
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXINVERT()
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Invert();
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXROTATEAT(int x, int y, float angle)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->RotateAt(angle, PointF(x, y));
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXROTATE(float angle)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Rotate(angle);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXSHEAR(float x, float y)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Shear(x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXSCALE(float x, float y)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Scale(x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr MATRIXTRANSLATE(float x, float y)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		transform_matrix->Translate(x, y);
-		return Strue;
-	}
-
-	int get_encoder_clsid(WCHAR* format, CLSID* p_clsid)
-	{
-		unsigned int num = 0, size = 0;
-
-		GetImageEncodersSize(&num, &size);
-		if (size == 0)
-			return -1;
-
-		auto* p_image_codec_info = static_cast<ImageCodecInfo*>(malloc(size));
-		if (p_image_codec_info == nullptr)
-			return -1;
-
-		GetImageEncoders(num, size, p_image_codec_info);
-		for (unsigned int j = 0; j < num; ++j)
-		{
-			if (wcscmp(p_image_codec_info[j].MimeType, format) == 0)
-			{
-				*p_clsid = p_image_codec_info[j].Clsid;
-				free(p_image_codec_info);
-				return j;
-			}
-		}
-		free(p_image_codec_info);
-		return -1;
-	}
-
-	Gdiplus::Bitmap* resize_clone(Bitmap* bmp, INT width, INT height)
-	{
-		const auto o_height = bmp->GetHeight();
-		const auto o_width = bmp->GetWidth();
-		auto n_width = width;
-		auto n_height = height;
-		const auto ratio = static_cast<double>(o_width) / static_cast<double>(o_height);
-		if (o_width > o_height)
-		{
-			// Resize down by width
-			n_height = static_cast<UINT>(static_cast<double>(n_width) / ratio);
-		}
-		else
-		{
-			n_width = static_cast<UINT>(n_height * ratio);
-		}
-		auto* new_bitmap = new Gdiplus::Bitmap(n_width, n_height, bmp->GetPixelFormat());
-		Gdiplus::Graphics graphics(new_bitmap);
-		graphics.DrawImage(bmp, 0, 0, n_width, n_height);
-		return new_bitmap;
-	}
-
-	Gdiplus::Status h_bitmap_to_bitmap(HBITMAP source, Gdiplus::PixelFormat pixel_format, Gdiplus::Bitmap** result_out)
-	{
-		BITMAP source_info = { 0 };
-		if (!::GetObjectW(source, sizeof(source_info), &source_info))
-			return Gdiplus::GenericError;
-
-		Gdiplus::Status s;
-
-		std::unique_ptr<Gdiplus::Bitmap> target(
-			new Gdiplus::Bitmap(source_info.bmWidth, source_info.bmHeight, pixel_format));
-		if (!target.get())
-			return Gdiplus::OutOfMemory;
-		if ((s = target->GetLastStatus()) != Gdiplus::Ok)
-			return s;
-
-		Gdiplus::BitmapData target_info{};
-		Gdiplus::Rect rect(0, 0, source_info.bmWidth, source_info.bmHeight);
-
-		s = target->LockBits(&rect, Gdiplus::ImageLockModeWrite, pixel_format, &target_info);
-		if (s != Gdiplus::Ok)
-			return s;
-
-		if (target_info.Stride != source_info.bmWidthBytes)
-			return Gdiplus::InvalidParameter; // pixel_format is wrong!
-
-		CopyMemory(target_info.Scan0, source_info.bmBits, source_info.bmWidthBytes * source_info.bmHeight);
-
-		s = target->UnlockBits(&target_info);
-		if (s != Gdiplus::Ok)
-			return s;
-
-		*result_out = target.release();
-
-		return Gdiplus::Ok;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWSTRING(const int x, const int y, char* text)
-	{
-		// text arrives from scheme as UTF8; GDI+ needs wide text
-		auto draw_text = Text::Widen(text);
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-
-		Gdiplus::Graphics g2(active_surface);
-		g2.SetClip(clip_region, CombineModeReplace);
-		g2.SetSmoothingMode(quality_mode);
-		g2.SetTransform(transform_matrix);
-		g2.SetTextRenderingHint(static_cast<Gdiplus::TextRenderingHint>(font_hinting));
-		const PointF origin(x, y);
-		Gdiplus::Font font(font_face, font_size);
-		g2.DrawString(draw_text.data(), draw_text.length(), &font, origin, nullptr, solid_brush);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWGRADIENTSTRING(const int x, const int y, char* text)
-	{
-		auto draw_text = Text::Widen(text);
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Graphics g2(active_surface);
-		g2.SetClip(clip_region, CombineModeReplace);
-		g2.SetSmoothingMode(quality_mode);
-		g2.SetTransform(transform_matrix);
-		g2.SetTextRenderingHint(static_cast<Gdiplus::TextRenderingHint>(font_hinting));
-		const PointF origin(x, y);
-		Gdiplus::Font font(font_face, font_size);
-		g2.DrawString(draw_text.data(), draw_text.length(), &font, origin, nullptr, gradient_brush);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SAVEASPNG(char* fname)
-	{
-		auto file_name = Text::Widen(fname);
-		ULONG u_quality = 100;
-		CLSID image_clsid;
-		get_encoder_clsid(L"image/png", &image_clsid);
-		const auto hr_ret = active_surface->Save(file_name.data(), &image_clsid, nullptr) == 0 ? S_OK : E_FAIL;
-		if (hr_ret != S_OK)
-		{
-			return Sfalse;
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SAVEASJPEG(char* fname)
-	{
-		auto file_name = Text::Widen(fname);
-		ULONG u_quality = 100;
-		CLSID image_clsid;
-		EncoderParameters encoder_params{};
-		encoder_params.Count = 1;
-		encoder_params.Parameter[0].NumberOfValues = 1;
-		encoder_params.Parameter[0].Guid = EncoderQuality;
-		encoder_params.Parameter[0].Type = EncoderParameterValueTypeLong;
-		encoder_params.Parameter[0].Value = &u_quality;
-		get_encoder_clsid(L"image/jpeg", &image_clsid);
-		const HRESULT hr_ret = active_surface->Save(file_name.data(), &image_clsid, &encoder_params) == 0 ? S_OK : E_FAIL;
-		if (hr_ret != S_OK)
-		{
-			return Sfalse;
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SAVETOCLIPBOARD(char* fname)
-	{
-		if (!OpenClipboard(nullptr))
-		{
-			return Snil;
-		}
-
-		if (!EmptyClipboard())
-		{
-			return Snil;
-		}
-
-		const Color color(255, 0, 0, 0);
-		HBITMAP h_bitmap = nullptr;
-		active_surface->GetHBITMAP(color, &h_bitmap);
-
-		DIBSECTION ds;
-		WinGetObject(h_bitmap, sizeof(ds), &ds);
-		ds.dsBmih.biCompression = BI_RGB;
-		const auto hDC = GetDC(nullptr);
-		const auto hDDB = CreateDIBitmap(hDC, &ds.dsBmih,
-			CBM_INIT, ds.dsBm.bmBits, reinterpret_cast<BITMAPINFO*>(&ds.dsBmih),
-			DIB_RGB_COLORS);
-		ReleaseDC(nullptr, hDC);
-
-		if (!SetClipboardData(CF_BITMAP, hDDB))
-		{
-			DeleteObject(h_bitmap);
-			CloseClipboard();
-			return Strue;
-		}
-		DeleteObject(h_bitmap);
-		CloseClipboard();
-		return Snil;
-	}
-
-	extern "C" __declspec(dllexport) ptr FLIP(int d)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		active_surface->RotateFlip(static_cast<Gdiplus::RotateFlipType>(d));
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SETPIXEL(const int x, const int y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		active_surface->SetPixel(x, y, foreground_colour);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr RSETPIXEL(const REAL x, const REAL y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		active_surface->SetPixel(x, y, foreground_colour);
-		return Strue;
-	}
-
-#define CLIP_SMOOTH_TRANSFORM                    \
-	g2.SetClip(clip_region, CombineModeReplace); \
-	g2.SetSmoothingMode(quality_mode);           \
-	g2.SetTransform(transform_matrix);
-
-	extern "C" __declspec(dllexport) ptr FILLSOLIDRECT(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (solid_brush == nullptr)
-		{
-			solid_brush = new Gdiplus::SolidBrush(Gdiplus::Color(255, 0, 0, 0));
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillRectangle(solid_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr REALFILLSOLIDRECT(const REAL x, const REAL y, const REAL w, const REAL h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (solid_brush == nullptr)
-		{
-			solid_brush = new Gdiplus::SolidBrush(Gdiplus::Color(255, 0, 0, 0));
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillRectangle(solid_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr FILLGRADIENTRECT(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (gradient_brush == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillRectangle(gradient_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr FILLHATCHRECT(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (hatch_brush == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillRectangle(hatch_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr BRUSHRECT(const int x, const int y, const int w, const int h )
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (texture_brush == nullptr)
-		{
-			return Snil;
-		}
- 
-		Gdiplus::Graphics g2(active_surface);
-		g2.TranslateTransform(x, y);
-		g2.FillRectangle(texture_brush, 0, 0, w, h);
-		return Strue;
-	}
-
-	// looks up texture made earlier
-	extern "C" __declspec(dllexport) ptr BRUSHRECTID(const int id, const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::TextureBrush* texture_brush = (Gdiplus::TextureBrush *)textures[id];
-		if (texture_brush != nullptr) {
-			Gdiplus::Graphics g2(active_surface);
-			g2.TranslateTransform(x, y);
-			g2.FillRectangle(texture_brush, 0, 0, w, h);
-			return Strue;
-		}
-		return Sfalse;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr TILEDRECT(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (tiled_texture_brush == nullptr)
-		{
-			return Snil;
-		}
-
-		Gdiplus::Graphics g2(active_surface);
-		g2.FillRectangle(tiled_texture_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr FILLSOLIDELLIPSE(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (solid_brush == nullptr)
-		{
-			solid_brush = new Gdiplus::SolidBrush(Gdiplus::Color(255, 0, 0, 0));
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillEllipse(solid_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr BRUSHELLIPSE(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}	
-
-		if (texture_brush == nullptr)
-		{
-			return Snil;
-		}
-	 
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillEllipse(texture_brush, x, y, w, h);
-		return Strue;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr FILLGRADIENTELLIPSE(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (gradient_brush == nullptr)
-		{
-
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillEllipse(gradient_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr FILLHATCHELLIPSE(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (hatch_brush == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillEllipse(hatch_brush, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		FILLSOLIDPIE(const int x, const int y, const int w, const int h, const int i, const int j)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (solid_brush == nullptr)
-		{
-			solid_brush = new Gdiplus::SolidBrush(Gdiplus::Color(255, 0, 0, 0));
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-			g2.FillPie(solid_brush, x, y, w, h, i, j);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		FILLGRADIENTPIE(const int x, const int y, const int w, const int h, const int i, const int j)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (gradient_brush == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.FillPie(gradient_brush, x, y, w, h, i, j);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		FILLHATCHPIE(const int x, const int y, const int w, const int h, const int i, const int j)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		if (hatch_brush == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.FillPie(hatch_brush, x, y, w, h, i, j);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWRECT(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawRectangle(&pen, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		DRAWARC(const int x, const int y, const int w, const int h, const int i, const int j)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawArc(&pen, x, y, w, h, i, j);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWELLIPSE(const int x, const int y, const int w, const int h)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawEllipse(&pen, x, y, w, h);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		DRAWPIE(const int x, const int y, const int w, const int h, const int i, const int j)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawPie(&pen, x, y, w, h, i, j);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWLINE(const int x, const int y, const int x0, const int y0)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(foreground_colour, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawLine(&pen, x, y, x0, y0);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr DRAWGRADIENTLINE(const int x, const int y, const int x0, const int y0)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Gdiplus::Pen pen(gradient_brush, _pen_width);
-		Gdiplus::Graphics g2(active_surface);
-		CLIP_SMOOTH_TRANSFORM
-		g2.DrawLine(&pen, x, y, x0, y0);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr PENWIDTH(const float w)
-	{
-		_pen_width = w;
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SETFONTSIZE(const int w)
-	{
-		font_size = w;
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr COLR(const int r, const int g, const int b, const int a)
-	{
-		foreground_colour = Gdiplus::Color(a, r, g, b);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		GRADIENTBRUSH(int x, int y, int w, int h, int r, int g, int b, int a, int r0, int g0, int b0, int a0, double angle,
-			bool z)
-	{
-		delete gradient_brush;
-		gradient_brush = new Gdiplus::LinearGradientBrush(Gdiplus::Rect(x, y, w, h), Color(a, r, g, b),
-			Color(a0, r0, g0, b0), angle, z);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr GRADIENTSHAPE(char* type, float focus, float scale)
-	{
-		if (gradient_brush == nullptr)
-		{
-			return Snil;
-		}
-		if (strcmp(type, "bell") == 0)
-		{
-			gradient_brush->SetBlendBellShape(focus, scale);
-		}
-		else if (strcmp(type, "triangular") == 0)
-		{
-			gradient_brush->SetBlendTriangularShape(focus, scale);
-		}
-		else
-		{
-			return Snil;
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr SOLIDBRUSH(const int r, const int g, const int b, const int a)
-	{
-		if (solid_brush != nullptr)
-		{
-			delete solid_brush;
-		}
-		solid_brush = new Gdiplus::SolidBrush(Gdiplus::Color(a, r, g, b));
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		SETHATCHBRUSH(int style, int r, int g, int b, int a, int r0, int g0, int b0, int a0)
-	{
-		if (hatch_brush != nullptr)
-		{
-			delete hatch_brush;
-		}
-
-		hatch_brush = new Gdiplus::HatchBrush(Gdiplus::HatchStyle(style), Gdiplus::Color(a, r, g, b),
-			Color(a0, r0, g0, b0));
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr
-		SETTEXTUREBRUSH(Gdiplus::Image* image)
-	{
-		UINT o_height = image->GetHeight();
-		UINT o_width = image->GetWidth();
-		texture_brush = new Gdiplus::TextureBrush(image, (Gdiplus::WrapMode)4, 0, 0, o_width, o_height);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) int MAKETEXTUREBRUSH(Gdiplus::Image * image)
-	{
-		UINT o_height = image->GetHeight();
-		UINT o_width = image->GetWidth();
-		int id = add_texture(new Gdiplus::TextureBrush(image, (Gdiplus::WrapMode)4, 0, 0, o_width, o_height));
-		return id;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr SETTILEDTEXTUREBRUSH(Gdiplus::Image * image, int mode)
-	{
-		if (tiled_texture_brush != nullptr)
-		{
-			delete tiled_texture_brush;
-		}
-		tiled_texture_brush = new Gdiplus::TextureBrush(image, (Gdiplus::WrapMode)mode);
-		return Strue;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr PAPER(const int r, const int g, const int b, const int a)
-	{
-		if (paper_brush != nullptr)
-		{
-			delete paper_brush;
-		}
-		paper_brush = new Gdiplus::SolidBrush(Gdiplus::Color(a, r, g, b));
-		return Strue;
-	}
-
-	// make and clear graphics images.
-
-	// clear graphics
-	extern "C" __declspec(dllexport) ptr CLRS(const int x, const int y)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		if (paper_brush == nullptr)
-		{
-			paper_brush = new Gdiplus::SolidBrush(Gdiplus::Color(255, 0, 0, 0));
-		}
-		if (active_surface != nullptr)
-		{
-			delete active_surface;
-		}
-		if (display_surface != nullptr)
-		{
-			delete display_surface;
-		}
-		active_surface = new Gdiplus::Bitmap(x, y, PixelFormat32bppPARGB);
-		display_surface = new Gdiplus::Bitmap(x, y, PixelFormat32bppPARGB);
-		clip_region = new Gdiplus::Region(Gdiplus::Rect(0, 0, active_surface->GetWidth(), active_surface->GetHeight()));
-		Gdiplus::Graphics g2(active_surface);
-		g2.FillRectangle(paper_brush, 0, 0, x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr CLRG(const int x, const int y)
-	{
-		if (transform_matrix == nullptr)
-		{
-			transform_matrix = new Gdiplus::Matrix();
-		}
-		if (gradient_brush == nullptr)
-		{
-
-			return Snil;
-		}
-		if (active_surface != nullptr)
-		{
-			delete active_surface;
-		}
-		if (display_surface != nullptr)
-		{
-			delete display_surface;
-		}
-		active_surface = new Gdiplus::Bitmap(x, y, PixelFormat32bppRGB);
-		display_surface = new Gdiplus::Bitmap(x, y, PixelFormat32bppRGB);
-		clip_region = new Gdiplus::Region(Gdiplus::Rect(0, 0, active_surface->GetWidth(), active_surface->GetHeight()));
-		Gdiplus::Graphics g2(active_surface);
-		g2.FillRectangle(gradient_brush, 0, 0, x, y);
-		return Strue;
-	}
-
-	void swap_buffers(int n) {
-		WaitForSingleObject(g_image_rotation_mutex, INFINITE);
-		if (n > 0) { // copy active surface to display surface.
-			Gdiplus::Graphics g(display_surface);
-			g.SetCompositingMode(CompositingModeSourceCopy);
-			g.SetCompositingQuality(CompositingQualityHighSpeed);
-			g.SetPixelOffsetMode(PixelOffsetModeNone);
-			g.SetSmoothingMode(SmoothingModeNone);
-			g.SetInterpolationMode(InterpolationModeDefault);
-			g.DrawImage(active_surface, 0, 0);
-		}
-		temp_surface = active_surface;
-		active_surface = display_surface;
-		display_surface = temp_surface;
-
-		ReleaseMutex(g_image_rotation_mutex);
-	}
-	// swap the two buffers; if n=1 copy old to new; preserve progress.
-	extern "C" __declspec(dllexport) ptr SWAP(int n) {
-
-		swap_buffers(n);
-		return Strue;
-	}
-
-	Gdiplus::Bitmap * __stdcall get_display_surface(void) {
-		return display_surface;
-	}
-
-
-	extern "C" __declspec(dllexport) Gdiplus::Bitmap * __stdcall RESIZEDCLONEDBITMAP(Gdiplus::Bitmap * bmp, int w, int h)
-	{
-		UINT o_height = bmp->GetHeight();
-		UINT o_width = bmp->GetWidth();
-		INT n_width = w;
-		INT n_height = h;
-		double ratio = ((double)o_width) / ((double)o_height);
-		if (o_width > o_height) {
-			// Resize down by width
-			n_height = static_cast<UINT>(((double)n_width) / ratio);
-		}
-		else {
-			n_width = static_cast<UINT>(n_height * ratio);
-		}
-		Gdiplus::Bitmap* newBitmap = new Gdiplus::Bitmap(n_width, n_height, bmp->GetPixelFormat());
-		Gdiplus::Graphics graphics(newBitmap);
-		graphics.DrawImage(bmp, 0, 0, n_width, n_height);
-		return newBitmap;
-	}
-
-	extern "C" __declspec(dllexport) Gdiplus::Image * __stdcall CLONEIMAGE(Gdiplus::Image * image)
-	{
-		UINT o_height = image->GetHeight();
-		UINT o_width = image->GetWidth();
-		Gdiplus::Image* new_image = new Gdiplus::Bitmap(o_height, o_width, PixelFormat32bppARGB);
-		Gdiplus::Graphics graphics(new_image);
-		graphics.DrawImage(image, 0, 0, o_width, o_width);
-		return new_image;
-	}
-
-
-	extern "C" __declspec(dllexport) Gdiplus::Image * __stdcall RESIZEDCLONEIMAGE(Gdiplus::Image * image, int w, int h)
-	{
-		UINT o_height = image->GetHeight();
-		UINT o_width = image->GetWidth();
-		INT n_width = w;
-		INT n_height = h;
-		double ratio = ((double)o_width) / ((double)o_height);
-		if (o_width > o_height) {
-			// Resize down by width
-			n_height = static_cast<UINT>(((double)n_width) / ratio);
-		}
-		else {
-			n_width = static_cast<UINT>(n_height * ratio);
-		}
-		Gdiplus::Image* new_image = new Gdiplus::Bitmap(n_width, n_height, image->GetPixelFormat());
-		Gdiplus::Graphics graphics(new_image);
-		graphics.DrawImage(image, 0, 0, n_width, n_height);
-		return new_image;
-	}
-
-
-	extern "C" __declspec(dllexport) Gdiplus::Image * __stdcall ROTATEDCLONEDIMAGE(int a, Gdiplus::Image * image)
-	{
-
-		FLOAT angle = a * 0.1;
-		int h = image->GetHeight();
-		int w = image->GetWidth();
-		Gdiplus::PointF center(w / 2, h / 2);
-		int new_h = h * 1.8;
-		int new_w = w * 1.8;
-		Gdiplus::Image* new_image = new Gdiplus::Bitmap(new_w, new_h, image->GetPixelFormat());
-		Graphics g(new_image);
-		Gdiplus::Matrix matrix;
-		matrix.Translate(new_w / 2, new_h / 2);
-		matrix.RotateAt(angle, center);
-		g.SetTransform(&matrix);
-		g.DrawImage(image, 0, 0);
-		return new_image;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr  __stdcall DISPLAYACTIVE(HDC h, int x, int y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(h);
-		g.DrawImage(active_surface, x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr  __stdcall DISPLAYSURFACE(Gdiplus::Bitmap * bitmap, HDC h, int x, int y)
-	{
-		if (active_surface == nullptr || bitmap == nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(h);
-		g.DrawImage(bitmap, x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr  __stdcall IMAGETOSURFACE(Image * image, int x, int y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(active_surface);
-		g.DrawImage(image, x, y);
-		return Strue;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr  __stdcall ROTATEDIMAGETOSURFACE(int angle, Image * image, int x, int y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(active_surface);
-		Gdiplus::PointF center(x / 2, y / 2);
-		Gdiplus::Matrix matrix;
-		matrix.RotateAt(angle * 0.1, center);
-		g.SetTransform(&matrix);
-		g.DrawImage(image, x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr  __stdcall SCALEDIMAGETOSURFACE(int s, Image * image, int x, int y)
-	{
-		if (active_surface == nullptr || image==nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(active_surface);
-		Gdiplus::Matrix matrix;
-		matrix.Scale(s * 0.1, s * 0.1);
-		Point p(x, y);
-		g.SetTransform(&matrix);
-		g.DrawImage(image, p);
-		return Strue;
-	}
-
-
-	extern "C" __declspec(dllexport) ptr  __stdcall SCALEDROTATEDIMAGETOSURFACE(int s, int a, Image * image, int x, int y)
-	{
-		if (active_surface == nullptr || image == nullptr)
-		{
-			return Snil;
-		}
-		Graphics g(active_surface);
-		Gdiplus::Matrix matrix;
-		Gdiplus::PointF center(image->GetWidth() / 2, image->GetHeight() / 2);
-		matrix.Scale(s * 0.1, s * 0.1);
-		matrix.RotateAt(a * 0.1, center);
-		g.SetTransform(&matrix);
-		g.DrawImage(image, x, y);
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr  __stdcall LOADTOSURFACE(char* filename, int x, int y)
-	{
-		if (active_surface == nullptr)
-		{
-			return Snil;
-		}
-		Image image(Text::widen(filename).c_str());
-		Graphics g2(active_surface);
-		g2.DrawImage(&image, x, y);
-		return Strue;
-	}
-
-
-
-	extern "C" __declspec(dllexport) ptr __stdcall FREESURFACE(Gdiplus::Bitmap * surface)
-	{
-		if (surface != nullptr)
-		{
-			delete surface;
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr __stdcall FREEIMAGE(Image * image)
-	{
-		if (image != nullptr)
-		{
-			delete image;
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) ptr __stdcall ACTIVATESURFACE(Gdiplus::Bitmap * surface)
-	{
-		if (surface != nullptr)
-		{
-			WaitForSingleObject(g_image_rotation_mutex, INFINITE);
-			active_surface = surface;
-			ReleaseMutex(g_image_rotation_mutex);
-		}
-		return Strue;
-	}
-
-	extern "C" __declspec(dllexport) void* __stdcall MAKESURFACE(int w, int h)
-	{
-		auto new_surface = new Gdiplus::Bitmap(w, h, PixelFormat32bppARGB);
-		Gdiplus::Graphics g2(new_surface);
-		paper_brush = new Gdiplus::SolidBrush(Gdiplus::Color(0, 0, 0, 0));
-		g2.FillRectangle(paper_brush, 0, 0, w, h);
-		return(void*)new_surface;
-	}
-
-	extern "C" __declspec(dllexport) void* __stdcall LOADIMAGE(char* filename)
-	{
-		auto new_image = new Image(Text::widen(filename).c_str());
-		return new_image;
-	}
-
-	extern "C" __declspec(dllexport)  void* __stdcall get_surface() {
-		WaitForSingleObject(g_image_rotation_mutex, INFINITE);
-		auto x = active_surface;
-		ReleaseMutex(g_image_rotation_mutex);
-		return x;
-	}
-
-	extern "C" __declspec(dllexport)  ptr __stdcall get_texture_brush() {
-		auto x = texture_brush;
-		return x;
-	}
-
-	extern "C" __declspec(dllexport)  ptr __stdcall set_texture_brush( Gdiplus::TextureBrush* x) {
-	 
-		texture_brush=x;
- 
-		return Strue;
-	}
-
-
-	// mode; stretch; fill etc.
-	extern "C" __declspec(dllexport) ptr GRMODE(int m)
-	{
-		_graphics_mode = m;
-		return Strue;
-	}
-
-
-	int graphics_mode() {
-		return _graphics_mode;
-	}
-
-} // namespace 
-
-
-
-
-void _init_graphics() {
-	// graphics
-	Sforeign_symbol("CLRS", static_cast<ptr>(GlobalGraphics::CLRS));
-	Sforeign_symbol("CLRG", static_cast<ptr>(GlobalGraphics::CLRG));
-	Sforeign_symbol("GSWAP", static_cast<ptr>(GlobalGraphics::SWAP));
-	Sforeign_symbol("SAVEASPNG", static_cast<ptr>(GlobalGraphics::SAVEASPNG));
-	Sforeign_symbol("SAVEASJPEG", static_cast<ptr>(GlobalGraphics::SAVEASJPEG));
-	Sforeign_symbol("SAVETOCLIPBOARD", static_cast<ptr>(GlobalGraphics::SAVETOCLIPBOARD));
-	Sforeign_symbol("PENWIDTH", static_cast<ptr>(GlobalGraphics::PENWIDTH));
-	Sforeign_symbol("SOLIDBRUSH", static_cast<ptr>(GlobalGraphics::SOLIDBRUSH));
-	Sforeign_symbol("SETHATCHBRUSH", static_cast<ptr>(GlobalGraphics::SETHATCHBRUSH));
-	Sforeign_symbol("SETTEXTUREBRUSH", static_cast<ptr>(GlobalGraphics::SETTEXTUREBRUSH));
-	Sforeign_symbol("MAKETEXTUREBRUSH", static_cast<ptr>(GlobalGraphics::MAKETEXTUREBRUSH));
-	Sforeign_symbol("SETTILEDTEXTUREBRUSH", static_cast<ptr>(GlobalGraphics::SETTILEDTEXTUREBRUSH));
-	Sforeign_symbol("GRADIENTBRUSH", static_cast<ptr>(GlobalGraphics::GRADIENTBRUSH));
-	Sforeign_symbol("GRADIENTSHAPE", static_cast<ptr>(GlobalGraphics::GRADIENTSHAPE));
-	Sforeign_symbol("PAPER", static_cast<ptr>(GlobalGraphics::PAPER));
-	Sforeign_symbol("DRAWRECT", static_cast<ptr>(GlobalGraphics::DRAWRECT));
-	Sforeign_symbol("BRUSHRECT", static_cast<ptr>(GlobalGraphics::BRUSHRECT));
-	Sforeign_symbol("BRUSHRECTID", static_cast<ptr>(GlobalGraphics::BRUSHRECTID));
-	Sforeign_symbol("TILEDRECT", static_cast<ptr>(GlobalGraphics::TILEDRECT));
-	Sforeign_symbol("FILLSOLIDRECT", static_cast<ptr>(GlobalGraphics::FILLSOLIDRECT));
-	Sforeign_symbol("REALFILLSOLIDRECT", static_cast<ptr>(GlobalGraphics::REALFILLSOLIDRECT));
-	Sforeign_symbol("FILLGRADIENTRECT", static_cast<ptr>(GlobalGraphics::FILLGRADIENTRECT));
-	Sforeign_symbol("FILLHATCHRECT", static_cast<ptr>(GlobalGraphics::FILLHATCHRECT));
-	Sforeign_symbol("DRAWELLIPSE", static_cast<ptr>(GlobalGraphics::DRAWELLIPSE));
-	Sforeign_symbol("BRUSHELLIPSE", static_cast<ptr>(GlobalGraphics::BRUSHELLIPSE));
-	Sforeign_symbol("FILLSOLIDELLIPSE", static_cast<ptr>(GlobalGraphics::FILLSOLIDELLIPSE));
-	Sforeign_symbol("FILLGRADIENTELLIPSE", static_cast<ptr>(GlobalGraphics::FILLGRADIENTELLIPSE));
-	Sforeign_symbol("FILLHATCHELLIPSE", static_cast<ptr>(GlobalGraphics::FILLHATCHELLIPSE));
-	Sforeign_symbol("DRAWARC", static_cast<ptr>(GlobalGraphics::DRAWARC));
-	Sforeign_symbol("DRAWPIE", static_cast<ptr>(GlobalGraphics::DRAWPIE));
-	Sforeign_symbol("FILLSOLIDPIE", static_cast<ptr>(GlobalGraphics::FILLSOLIDPIE));
-	Sforeign_symbol("FILLGRADIENTPIE", static_cast<ptr>(GlobalGraphics::FILLGRADIENTPIE));
-	Sforeign_symbol("FILLHATCHPIE", static_cast<ptr>(GlobalGraphics::FILLHATCHPIE));
-	Sforeign_symbol("DRAWLINE", static_cast<ptr>(GlobalGraphics::DRAWLINE));
-	Sforeign_symbol("DRAWGRADIENTLINE", static_cast<ptr>(GlobalGraphics::DRAWGRADIENTLINE));
-	Sforeign_symbol("DRAWSTRING", static_cast<ptr>(GlobalGraphics::DRAWSTRING));
-	Sforeign_symbol("DRAWGRADIENTSTRING", static_cast<ptr>(GlobalGraphics::DRAWGRADIENTSTRING));
-	Sforeign_symbol("SETPIXEL", static_cast<ptr>(GlobalGraphics::SETPIXEL));
-	Sforeign_symbol("RSETPIXEL", static_cast<ptr>(GlobalGraphics::RSETPIXEL));
-	Sforeign_symbol("COLR", static_cast<ptr>(GlobalGraphics::COLR));
-	Sforeign_symbol("GRMODE", static_cast<ptr>(GlobalGraphics::GRMODE));
-	Sforeign_symbol("SETFONTSIZE", static_cast<ptr>(GlobalGraphics::SETFONTSIZE));
-	Sforeign_symbol("QUALITYFAST", static_cast<ptr>(GlobalGraphics::QUALITYFAST));
-	Sforeign_symbol("QUALITYHIGH", static_cast<ptr>(GlobalGraphics::QUALITYHIGH));
-	Sforeign_symbol("QUALITYANTIALIAS", static_cast<ptr>(GlobalGraphics::QUALITYANTIALIAS));
-	Sforeign_symbol("FLIP", static_cast<ptr>(GlobalGraphics::FLIP));
-	Sforeign_symbol("MATRIXRESET", static_cast<ptr>(GlobalGraphics::MATRIXRESET));
-	Sforeign_symbol("MATRIXINVERT", static_cast<ptr>(GlobalGraphics::MATRIXINVERT));
-	Sforeign_symbol("MATRIXSCALE", static_cast<ptr>(GlobalGraphics::MATRIXSCALE));
-	Sforeign_symbol("MATRIXTRANSLATE", static_cast<ptr>(GlobalGraphics::MATRIXTRANSLATE));
-	Sforeign_symbol("MATRIXSHEAR", static_cast<ptr>(GlobalGraphics::MATRIXSHEAR));
-	Sforeign_symbol("MATRIXROTATE", static_cast<ptr>(GlobalGraphics::MATRIXROTATE));
-	Sforeign_symbol("MATRIXROTATEAT", static_cast<ptr>(GlobalGraphics::MATRIXROTATEAT));
-	Sforeign_symbol("LOADIMAGE", static_cast<ptr>(GlobalGraphics::LOADIMAGE));
-	Sforeign_symbol("MAKESURFACE", static_cast<ptr>(GlobalGraphics::MAKESURFACE));
-	Sforeign_symbol("ACTIVATESURFACE", static_cast<ptr>(GlobalGraphics::ACTIVATESURFACE));
- 
-	Sforeign_symbol("FREESURFACE", static_cast<ptr>(GlobalGraphics::FREESURFACE));
-	Sforeign_symbol("FREEIMAGE", static_cast<ptr>(GlobalGraphics::FREEIMAGE));
-	Sforeign_symbol("LOADTOSURFACE", static_cast<ptr>(GlobalGraphics::LOADTOSURFACE));
-	Sforeign_symbol("SCALEDROTATEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::SCALEDROTATEDIMAGETOSURFACE));
-	Sforeign_symbol("SCALEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::SCALEDIMAGETOSURFACE));
-	Sforeign_symbol("ROTATEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::ROTATEDIMAGETOSURFACE));
-	Sforeign_symbol("IMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::IMAGETOSURFACE));
-	Sforeign_symbol("DISPLAYSURFACE", static_cast<ptr>(GlobalGraphics::DISPLAYSURFACE));
-	Sforeign_symbol("DISPLAYACTIVE", static_cast<ptr>(GlobalGraphics::DISPLAYACTIVE));
-	Sforeign_symbol("RESIZEDCLONEDBITMAP", static_cast<ptr>(GlobalGraphics::RESIZEDCLONEDBITMAP));
-	Sforeign_symbol("CLONEIMAGE", static_cast<ptr>(GlobalGraphics::CLONEIMAGE));
-	Sforeign_symbol("RESIZEDCLONEIMAGE", static_cast<ptr>(GlobalGraphics::RESIZEDCLONEIMAGE));
-	Sforeign_symbol("RESIZEDCLONEDBITMAP", static_cast<ptr>(GlobalGraphics::RESIZEDCLONEDBITMAP));
-	Sforeign_symbol("ROTATEDCLONEDIMAGE", static_cast<ptr>(GlobalGraphics::ROTATEDCLONEDIMAGE));
-	Sforeign_symbol("IMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::IMAGETOSURFACE));
-	Sforeign_symbol("ROTATEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::ROTATEDIMAGETOSURFACE));
-	Sforeign_symbol("SCALEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::SCALEDIMAGETOSURFACE));
-	Sforeign_symbol("SCALEDROTATEDIMAGETOSURFACE", static_cast<ptr>(GlobalGraphics::SCALEDROTATEDIMAGETOSURFACE));
-	Sforeign_symbol("LOADTOSURFACE", static_cast<ptr>(GlobalGraphics::LOADTOSURFACE));
-	Sforeign_symbol("get_surface", static_cast<ptr>(GlobalGraphics::get_surface));
-	Sforeign_symbol("get_texture_brush", static_cast<ptr>(GlobalGraphics::get_texture_brush));
-	Sforeign_symbol("set_texture_brush", static_cast<ptr>(GlobalGraphics::set_texture_brush));
-}
-
 namespace Assoc
 {
 	ptr sstring(const char* symbol, const char* value)
@@ -3308,3 +2113,903 @@ namespace Assoc
 		return l;
 	}
 } // namespace Assoc
+
+namespace Graphics2D{
+
+	#pragma comment(lib, "d2d1.lib")
+	#pragma comment(lib, "Dwrite.lib")
+	#pragma comment (lib, "Windowscodecs.lib")
+	// set by init function
+
+	HWND main_window = nullptr;
+	HANDLE g_rotation_mutex=nullptr;
+
+ 
+
+	float prefer_width = 800.0f;
+	float prefer_height = 600.0f;
+	// represents the visible surface on the window itself.
+
+	ID2D1HwndRenderTarget* pRenderTarget;
+
+	// stoke width 
+	float d2d_stroke_width = 1.3;
+	ID2D1StrokeStyle* d2d_stroke_style = nullptr;
+
+	// colours and brushes used when drawing
+	ID2D1SolidColorBrush* pColourBrush = nullptr;       // line-color
+	ID2D1SolidColorBrush* pfillColourBrush = nullptr;   // fill-color
+	ID2D1BitmapBrush* pPatternBrush = nullptr;          // brush-pattern
+	ID2D1BitmapBrush* pTileBrush = nullptr;				// tile its U/S
+
+	// we draw into this
+	ID2D1Bitmap* bitmap = nullptr;
+	ID2D1BitmapRenderTarget* BitmapRenderTarget = nullptr;
+	ID2D1Bitmap* bitmap2 = nullptr;
+	ID2D1BitmapRenderTarget* BitmapRenderTarget2 = nullptr;
+
+	ID2D1Factory* pD2DFactory;
+
+	// hiDPI
+	float g_DPIScaleX = 1.0f;
+	float g_DPIScaleY = 1.0f;
+	float _pen_width = static_cast<float>(1.2);
+
+#pragma warning(disable : 4996)
+
+	void d2d_CreateOffscreenBitmap()
+	{
+		if (pRenderTarget == nullptr)
+		{
+			return;
+		}
+
+		if (BitmapRenderTarget == NULL) {
+			pRenderTarget->CreateCompatibleRenderTarget(D2D1::SizeF(prefer_width, prefer_height), &BitmapRenderTarget);
+			BitmapRenderTarget->GetBitmap(&bitmap);
+		}
+		if (BitmapRenderTarget2 == NULL) {
+			pRenderTarget->CreateCompatibleRenderTarget(D2D1::SizeF(prefer_width, prefer_height), &BitmapRenderTarget2);
+			BitmapRenderTarget2->GetBitmap(&bitmap2);
+		}
+	}
+
+	void swap_buffers(int n) {
+
+		if (pRenderTarget == nullptr) {
+			return;
+		}
+		//WaitForSingleObject(g_image_rotation_mutex, INFINITE);
+		ID2D1Bitmap* temp;
+		d2d_CreateOffscreenBitmap();
+		if (n == 1) {
+			BitmapRenderTarget2->BeginDraw();
+			BitmapRenderTarget2->DrawBitmap(bitmap, D2D1::RectF(0.0f, 0.0f, prefer_width, prefer_height));
+			BitmapRenderTarget2->EndDraw();
+		}
+		temp = bitmap;
+		bitmap = bitmap2;
+		bitmap2 = temp;
+		ID2D1BitmapRenderTarget* temptarget;
+		temptarget = BitmapRenderTarget;
+		BitmapRenderTarget = BitmapRenderTarget2;
+		BitmapRenderTarget2 = temptarget;
+	 
+		if (main_window != nullptr) {
+			InvalidateRect(main_window, NULL, FALSE);
+		}
+
+		//ReleaseMutex(g_image_rotation_mutex);
+		Sleep(1);
+
+	}
+
+	ptr d2d_show(int n)
+	{
+		swap_buffers(n);
+		return Strue;
+	}
+
+	ptr d2d_color(float r, float g, float b, float a) {
+
+		if (BitmapRenderTarget == NULL)
+		{
+			return Snil;
+		}
+		SafeRelease(&pColourBrush);
+		HRESULT hr = BitmapRenderTarget->CreateSolidColorBrush(
+			D2D1::ColorF(D2D1::ColorF(r, g, b, a)),
+			&pColourBrush
+		);
+		return Strue;
+	}
+
+
+	ptr d2d_fill_color(float r, float g, float b, float a) {
+
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		SafeRelease(&pfillColourBrush);
+		HRESULT hr = BitmapRenderTarget->CreateSolidColorBrush(
+			D2D1::ColorF(D2D1::ColorF(r, g, b, a)),
+			&pfillColourBrush
+		);
+		return Strue;
+	}
+
+	ptr d2d_ellipse(float x, float y, float w, float h) {
+
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		if (pColourBrush == nullptr) {
+			d2d_color(0.0, 0.0, 0.0, 1.0);
+		}
+		auto stroke_width = d2d_stroke_width;
+		auto stroke_style = d2d_stroke_style;
+		auto ellipse = D2D1::Ellipse(D2D1::Point2F(x, y), w, h);
+
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawEllipse(ellipse, pColourBrush, d2d_stroke_width);
+		BitmapRenderTarget->EndDraw();
+
+		return Strue;
+	}
+
+	ptr d2d_line(float x, float y, float x1, float y1) {
+
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		if (pColourBrush == nullptr) {
+			d2d_color(0.0, 0.0, 0.0, 1.0);
+		}
+		auto stroke_width = d2d_stroke_width;
+		auto stroke_style = d2d_stroke_style;
+		auto p1 = D2D1::Point2F(x, y);
+		auto p2 = D2D1::Point2F(x1, y1);
+
+
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawLine(p1, p2, pfillColourBrush, stroke_width, stroke_style);
+		BitmapRenderTarget->EndDraw();
+
+		return Strue;
+	}
+
+	ptr d2d_fill_ellipse(float x, float y, float w, float h) {
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		if (pfillColourBrush == nullptr) {
+			d2d_fill_color(0.0, 0.0, 0.0, 1.0);
+		}
+		auto ellipse = D2D1::Ellipse(D2D1::Point2F(x, y), w, h);
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->FillEllipse(ellipse, pfillColourBrush);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+	ptr d2d_rectangle(float x, float y, float w, float h) {
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		if (pColourBrush == nullptr) {
+			d2d_color(0.0, 0.0, 0.0, 1.0);
+		}
+		auto stroke_width = d2d_stroke_width;
+		auto stroke_style = d2d_stroke_style;
+		D2D1_RECT_F rectangle1 = D2D1::RectF(x, y, w, h);
+
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawRectangle(&rectangle1, pColourBrush, stroke_width);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+	ptr d2d_rounded_rectangle(float x, float y, float w, float h, float rx, float ry) {
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		if (pColourBrush == nullptr) {
+			d2d_color(0.0, 0.0, 0.0, 1.0);
+		}
+		auto stroke_width = d2d_stroke_width;
+		auto stroke_style = d2d_stroke_style;
+		D2D1_ROUNDED_RECT rectangle1 = { D2D1::RectF(x, y, w, h), rx, ry };
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawRoundedRectangle(rectangle1, pfillColourBrush, stroke_width, stroke_style);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+
+	ptr d2d_fill_rectangle(float x, float y, float w, float h) {
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		if (pfillColourBrush == nullptr) {
+			d2d_fill_color(0.0, 0.0, 0.0, 1.0);
+		}
+		D2D1_RECT_F rectangle1 = D2D1::RectF(x, y, w, h);
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->FillRectangle(&rectangle1, pfillColourBrush);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+	// reset matrix
+	ptr d2d_matrix_identity() {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		BitmapRenderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
+		return Strue;
+	}
+
+	ptr d2d_matrix_rotate(float a, float x, float y) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		BitmapRenderTarget->SetTransform(
+			D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y)));
+		return Strue;
+	}
+
+	ptr d2d_matrix_translate(float x, float y) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		BitmapRenderTarget->SetTransform(
+			D2D1::Matrix3x2F::Translation(40, 10));
+		return Strue;
+	}
+
+	ptr d2d_matrix_rotrans(float a, float x, float y, float x1, float y1) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y));
+		const D2D1::Matrix3x2F trans = D2D1::Matrix3x2F::Translation(x1, y1);
+		BitmapRenderTarget->SetTransform(rot * trans);
+		return Strue;
+	}
+
+	ptr d2d_matrix_transrot(float a, float x, float y, float x1, float y1) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y));
+		const D2D1::Matrix3x2F trans = D2D1::Matrix3x2F::Translation(x1, y1);
+		BitmapRenderTarget->SetTransform(trans * rot);
+		return Strue;
+	}
+
+	ptr d2d_matrix_scale(float x, float y) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		BitmapRenderTarget->SetTransform(
+			D2D1::Matrix3x2F::Scale(
+				D2D1::Size(x, y),
+				D2D1::Point2F(prefer_width / 2, prefer_height / 2))
+		);
+		return Strue;
+	}
+
+	ptr d2d_matrix_rotscale(float a, float x, float y, float x1, float y1) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		const auto scale = D2D1::Matrix3x2F::Scale(
+			D2D1::Size(x, y),
+			D2D1::Point2F(prefer_width / 2, prefer_height / 2));
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y));
+		BitmapRenderTarget->SetTransform(rot * scale);
+		return Strue;
+	}
+
+	ptr d2d_matrix_scalerot(float a, float x, float y, float x1, float y1) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		const auto scale = D2D1::Matrix3x2F::Scale(
+			D2D1::Size(x, y),
+			D2D1::Point2F(prefer_width / 2, prefer_height / 2));
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y));
+		BitmapRenderTarget->SetTransform(rot * scale);
+		return Strue;
+	}
+
+	ptr d2d_matrix_scalerottrans(float a, float x, float y, float x1, float y1, float x2, float y2) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		const auto scale = D2D1::Matrix3x2F::Scale(
+			D2D1::Size(x, y),
+			D2D1::Point2F(prefer_width / 2, prefer_height / 2));
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x, y));
+		const D2D1::Matrix3x2F trans = D2D1::Matrix3x2F::Translation(x1, y1);
+		BitmapRenderTarget->SetTransform(scale * rot * trans);
+		return Strue;
+	}
+
+	ptr d2d_matrix_skew(float x, float y) {
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		BitmapRenderTarget->SetTransform(
+			D2D1::Matrix3x2F::Skew(
+				x, y,
+				D2D1::Point2F(prefer_width / 2, prefer_height / 2))
+		);
+		return Strue;
+	}
+
+	// display current display buffer.
+	ptr d2d_render(float x, float y) {
+
+		swap_buffers(1);
+		if (pRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		pRenderTarget->BeginDraw();
+		pRenderTarget->DrawBitmap(bitmap2, D2D1::RectF(x, y, prefer_width, prefer_height));
+		pRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+	void d2d_DPIScale(ID2D1Factory* pFactory)
+	{
+		FLOAT dpiX, dpiY;
+		pFactory->GetDesktopDpi(&dpiX, &dpiY);
+		g_DPIScaleX = dpiX / 96.0f;
+		g_DPIScaleY = dpiY / 96.0f;
+	}
+
+	int d2d_CreateGridPatternBrush(
+		ID2D1RenderTarget* pRenderTarget,
+		ID2D1BitmapBrush** ppBitmapBrush
+	)
+	{
+
+		if (pPatternBrush != nullptr) {
+			return 0;
+		}
+		// Create a compatible render target.
+		ID2D1BitmapRenderTarget* pCompatibleRenderTarget = nullptr;
+		HRESULT hr = pRenderTarget->CreateCompatibleRenderTarget(
+			D2D1::SizeF(10.0f, 10.0f),
+			&pCompatibleRenderTarget
+		);
+		if (SUCCEEDED(hr))
+		{
+			// Draw a pattern.
+			ID2D1SolidColorBrush* pGridBrush = nullptr;
+			hr = pCompatibleRenderTarget->CreateSolidColorBrush(
+				D2D1::ColorF(D2D1::ColorF(0.93f, 0.94f, 0.96f, 1.0f)),
+				&pGridBrush
+			);
+
+			// create offscreen bitmap
+			d2d_CreateOffscreenBitmap();
+
+			if (SUCCEEDED(hr))
+			{
+				pCompatibleRenderTarget->BeginDraw();
+				pCompatibleRenderTarget->FillRectangle(D2D1::RectF(0.0f, 0.0f, 10.0f, 1.0f), pGridBrush);
+				pCompatibleRenderTarget->FillRectangle(D2D1::RectF(0.0f, 0.1f, 1.0f, 10.0f), pGridBrush);
+				pCompatibleRenderTarget->EndDraw();
+
+				// Retrieve the bitmap from the render target.
+				ID2D1Bitmap* pGridBitmap = nullptr;
+				hr = pCompatibleRenderTarget->GetBitmap(&pGridBitmap);
+				if (SUCCEEDED(hr))
+				{
+					// Choose the tiling mode for the bitmap brush.
+					D2D1_BITMAP_BRUSH_PROPERTIES brushProperties =
+						D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP, D2D1_EXTEND_MODE_WRAP);
+
+					// Create the bitmap brush.
+					hr = pRenderTarget->CreateBitmapBrush(pGridBitmap, brushProperties, ppBitmapBrush);
+
+					SafeRelease(&pGridBitmap);
+				}
+
+				SafeRelease(&pGridBrush);
+
+			}
+
+			SafeRelease(&pCompatibleRenderTarget);
+
+		}
+
+		return hr;
+	}
+
+	void d2d_make_default_stroke() {
+		HRESULT r = pD2DFactory->CreateStrokeStyle(
+			D2D1::StrokeStyleProperties(
+				D2D1_CAP_STYLE_FLAT,
+				D2D1_CAP_STYLE_FLAT,
+				D2D1_CAP_STYLE_ROUND,
+				D2D1_LINE_JOIN_MITER,
+				1.0f,
+				D2D1_DASH_STYLE_SOLID,
+				0.0f),
+			nullptr, 0,
+			&d2d_stroke_style
+		);
+	}
+
+
+	// direct write
+	IDWriteFactory* pDWriteFactory;
+	IDWriteTextFormat* TextFont;
+	ID2D1SolidColorBrush* pBlackBrush;
+
+	ptr d2d_write_text(float x, float y, char* s) {
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		if (pfillColourBrush == nullptr) {
+			d2d_fill_color(0.0, 0.0, 0.0, 1.0);
+		}
+
+		const auto text = Text::widen(s);
+		const auto len = text.length();
+
+		D2D1_RECT_F layoutRect = D2D1::RectF(x, y, prefer_width - x, prefer_height - y);
+
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawTextW(text.c_str(), len, TextFont, layoutRect, pfillColourBrush);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+	ptr d2d_set_font(char* s, float size) {
+
+		SafeRelease(&TextFont);
+		auto face = Text::Widen(s);
+		HRESULT
+			hr = pDWriteFactory->CreateTextFormat(
+				face.c_str(),
+				NULL,
+				DWRITE_FONT_WEIGHT_REGULAR,
+				DWRITE_FONT_STYLE_NORMAL,
+				DWRITE_FONT_STRETCH_NORMAL,
+				size,
+				L"en-us",
+				&TextFont
+			);
+		if (SUCCEEDED(hr)) {
+			return Strue;
+		}
+		return Snil;
+	}
+
+
+	// images bank
+	ID2D1Bitmap* pSpriteSheet[bank_size];
+
+	void d2d_sprite_loader(char* filename, int n)
+	{
+		if (n > bank_size - 1) {
+			return;
+		}
+		HRESULT hr;
+		CoInitialize(NULL);
+		IWICImagingFactory* wicFactory = NULL;
+		hr = CoCreateInstance(
+			CLSID_WICImagingFactory,
+			NULL,
+			CLSCTX_INPROC_SERVER,
+			IID_IWICImagingFactory,
+			(LPVOID*)&wicFactory);
+
+		if (FAILED(hr)) {
+			return;
+		}
+		//create a decoder
+		IWICBitmapDecoder* wicDecoder = NULL;
+		std::wstring fname = Text::Widen(filename);
+		hr = wicFactory->CreateDecoderFromFilename(
+			fname.c_str(),
+			NULL,
+			GENERIC_READ,
+			WICDecodeMetadataCacheOnLoad,
+			&wicDecoder);
+
+		IWICBitmapFrameDecode* wicFrame = NULL;
+		hr = wicDecoder->GetFrame(0, &wicFrame);
+
+		// create a converter
+		IWICFormatConverter* wicConverter = NULL;
+		hr = wicFactory->CreateFormatConverter(&wicConverter);
+
+		// setup the converter
+		hr = wicConverter->Initialize(
+			wicFrame,
+			GUID_WICPixelFormat32bppPBGRA,
+			WICBitmapDitherTypeNone,
+			NULL,
+			0.0,
+			WICBitmapPaletteTypeCustom
+		);
+		if (SUCCEEDED(hr))
+		{
+			hr = pRenderTarget->CreateBitmapFromWicBitmap(
+				wicConverter,
+				NULL,
+				&pSpriteSheet[n]
+			);
+		}
+		SafeRelease(&wicFactory);
+		SafeRelease(&wicDecoder);
+		SafeRelease(&wicConverter);
+		SafeRelease(&wicFrame);
+	}
+
+	ptr d2d_load_sprites(char* filename, int n) {
+		if (n > bank_size - 1) {
+			return Snil;
+		}
+		d2d_sprite_loader(filename, n);
+		return Strue;
+	}
+
+
+	// from sheet n; at sx, sy to dx, dy, w,h
+	ptr d2d_render_sprite(int n, float dx, float dy) {
+
+		if (n > bank_size - 1) {
+			return Snil;
+		}
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		auto sprite_sheet = pSpriteSheet[n];
+		if (sprite_sheet == NULL) {
+			return Snil;
+		}
+		const auto size = sprite_sheet->GetPixelSize();
+		const auto dest = D2D1::RectF(dx, dy, dx + size.width, dy + size.height);
+		const auto opacity = 1.0f;
+		BitmapRenderTarget->SetTransform(
+			D2D1::Matrix3x2F::Scale(
+				D2D1::Size(1.0, 1.0),
+				D2D1::Point2F(size.width / 2, size.height / 2)));
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawBitmap(sprite_sheet, dest);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+	ptr d2d_render_sprite_rotscale(int n, float dx, float dy, float a, float s) {
+
+		if (n > bank_size - 1) {
+			return Snil;
+		}
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+		auto sprite_sheet = pSpriteSheet[n];
+		if (sprite_sheet == NULL) {
+			return Snil;
+		}
+		const auto size = sprite_sheet->GetPixelSize();
+		const auto dest = D2D1::RectF(dx, dy, dx + size.width, dy + size.height);
+		const auto opacity = 1.0f;
+
+		const auto scale = D2D1::Matrix3x2F::Scale(
+			D2D1::Size(s, s),
+			D2D1::Point2F(dx, dy));
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(dx + (size.width / 2), dy + (size.height / 2)));
+
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->SetTransform(rot * scale);
+		BitmapRenderTarget->DrawBitmap(sprite_sheet, dest);
+		BitmapRenderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+	// from sheet n; at sx, sy to dx, dy, w,h scale up
+	ptr d2d_render_sprite_sheet(int n, float dx, float dy, float dw, float dh,
+		float sx, float sy, float sw, float sh, float scale) {
+
+		if (n > bank_size - 1) {
+			return Snil;
+		}
+
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		auto sprite_sheet = pSpriteSheet[n];
+		if (sprite_sheet == NULL) {
+			return Snil;
+		}
+		const auto size = sprite_sheet->GetPixelSize();
+		const auto dest = D2D1::RectF(dx, dy, scale * (dx + dw), scale * (dy + dh));
+		const auto source = D2D1::RectF(sx, sy, sx + sw, sy + sh);
+		const auto opacity = 1.0f;
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->DrawBitmap(sprite_sheet, dest, 1.0f,
+			D2D1_BITMAP_INTERPOLATION_MODE::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, source);
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+	// from sheet n; at sx, sy to dx, dy, w,h scale up
+	ptr d2d_render_sprite_sheet_rot_scale(int n, float dx, float dy, float dw, float dh,
+		float sx, float sy, float sw, float sh, float scale, float a, float x2, float y2) {
+
+		if (n > bank_size - 1) {
+			return Snil;
+		}
+		if (BitmapRenderTarget == nullptr)
+		{
+			return Snil;
+		}
+
+		auto sprite_sheet = pSpriteSheet[n];
+		if (sprite_sheet == NULL) {
+			return Snil;
+		}
+		const auto size = sprite_sheet->GetPixelSize();
+		const auto dest = D2D1::RectF(dx, dy, scale * (dx + dw), scale * (dy + dh));
+		const auto source = D2D1::RectF(sx, sy, sx + sw, sy + sh);
+		const auto opacity = 1.0f;
+		const D2D1::Matrix3x2F rot = D2D1::Matrix3x2F::Rotation(a, D2D1::Point2F(x2, y2));
+		BitmapRenderTarget->BeginDraw();
+		BitmapRenderTarget->SetTransform(rot);
+		BitmapRenderTarget->DrawBitmap(sprite_sheet, dest, 1.0f,
+			D2D1_BITMAP_INTERPOLATION_MODE::D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, source);
+		BitmapRenderTarget->SetTransform(D2D1::Matrix3x2F::Identity());
+		BitmapRenderTarget->EndDraw();
+		return Strue;
+	}
+
+
+
+	void CreateFactory() {
+
+		if (pD2DFactory == NULL) {
+			HRESULT hr = D2D1CreateFactory(
+				D2D1_FACTORY_TYPE_MULTI_THREADED, &pD2DFactory);
+			d2d_DPIScale(pD2DFactory);
+		}
+		if (pDWriteFactory == NULL) {
+			HRESULT hr = DWriteCreateFactory(
+				DWRITE_FACTORY_TYPE_SHARED,
+				__uuidof(IDWriteFactory),
+				reinterpret_cast<IUnknown**>(&pDWriteFactory)
+			);
+		}
+	}
+
+	HRESULT Create_D2D_Device_Dep(HWND h)  
+	{
+		if (IsWindow(h)) {
+
+			if (pRenderTarget == NULL)
+			{
+				appendTranscriptNL("New render target");
+				CreateFactory();
+
+				RECT rc;
+				GetClientRect(h, &rc);
+
+				D2D1_SIZE_U size = D2D1::SizeU(rc.right, rc.bottom);
+
+				HRESULT hr = pD2DFactory->CreateHwndRenderTarget(
+					D2D1::RenderTargetProperties(),
+					D2D1::HwndRenderTargetProperties(h,
+						D2D1::SizeU((UINT32)rc.right, (UINT32)rc.bottom)),
+					&pRenderTarget);
+
+				if (FAILED(hr)) {
+					appendTranscriptNL("New render target: Failed");
+					return hr;
+				}
+
+				d2d_CreateGridPatternBrush(pRenderTarget, &pPatternBrush);
+
+				hr = pDWriteFactory->CreateTextFormat(
+					L"Consolas",
+					NULL,
+					DWRITE_FONT_WEIGHT_REGULAR,
+					DWRITE_FONT_STYLE_NORMAL,
+					DWRITE_FONT_STRETCH_NORMAL,
+					32.0f,
+					L"en-us",
+					&TextFont
+				);
+
+				if (FAILED(hr)) {
+					appendTranscriptNL("New render target: Text Format Failed");
+					return hr;
+				}
+
+				hr = pRenderTarget->CreateSolidColorBrush(
+					D2D1::ColorF(D2D1::ColorF::Black),
+					&pBlackBrush
+				);
+
+				if (FAILED(hr)) {
+					appendTranscriptNL("New render target: Black Brush Failed");
+					return hr;
+				}
+
+	
+				return hr;
+			}
+		}
+		return 0;
+	}
+
+
+	void safe_release() {
+
+		SafeRelease(&pRenderTarget);
+		SafeRelease(&pPatternBrush);
+		SafeRelease(&pBlackBrush);
+		SafeRelease(&pD2DFactory);
+		SafeRelease(&TextFont);
+		SafeRelease(&BitmapRenderTarget);
+		SafeRelease(&BitmapRenderTarget2);
+
+
+	}
+
+
+	ptr d2d_release() {
+		
+		safe_release();
+ 
+		return Strue;
+	}
+
+
+	void onPaint(HWND hWnd) {
+
+		WaitForSingleObject(g_image_rotation_mutex, INFINITE);
+
+		if (main_window == nullptr) {
+			main_window = hWnd;
+		}
+
+		if (main_window != hWnd) {
+			main_window = hWnd;
+			appendTranscriptNL("Window change detected");
+			safe_release();
+		}
+
+		PAINTSTRUCT ps;
+		HDC hdc = ::BeginPaint(hWnd, &ps);
+		RECT rc;
+		::GetClientRect(hWnd, &rc);
+		D2D1_SIZE_U size = D2D1::SizeU(rc.right, rc.bottom);
+		HRESULT
+
+		hr = Create_D2D_Device_Dep(hWnd);
+		if (SUCCEEDED(hr))
+		{
+
+			pRenderTarget->Resize(size);
+			pRenderTarget->BeginDraw();
+			D2D1_SIZE_F renderTargetSize = pRenderTarget->GetSize();
+			pRenderTarget->Clear(D2D1::ColorF(D2D1::ColorF::LightGray));
+
+			pRenderTarget->FillRectangle(
+				D2D1::RectF(0.0f, 0.0f, renderTargetSize.width, renderTargetSize.height), pPatternBrush);
+	 
+			if (bitmap2 != nullptr) {
+				pRenderTarget->DrawBitmap(bitmap2, D2D1::RectF(0.0f, 0.0f, prefer_width, prefer_height));
+			}
+			hr = pRenderTarget->EndDraw();
+
+			if (FAILED(hr)) {
+				appendTranscriptNL("Draw failed!");
+				safe_release();
+			}
+
+		}
+
+		if (hr == D2DERR_RECREATE_TARGET)
+		{
+			safe_release();
+			appendTranscriptNL("image was released by: D2DERR_RECREATE_TARGET");
+		 
+		}
+		if (FAILED(hr)) {
+			safe_release();
+			appendTranscriptNL("Render target failed to be created.");
+		}
+		else
+		{
+			::ValidateRect(hWnd, NULL);
+		}
+
+		::EndPaint(hWnd, &ps);
+		ReleaseMutex(g_image_rotation_mutex);
+	}
+
+	void step(ptr lpParam) {
+
+		WaitForSingleObject(g_image_rotation_mutex, INFINITE);
+
+		if (Sprocedurep(lpParam)) {
+			Scall0(lpParam);
+		}
+
+		ReleaseMutex(g_image_rotation_mutex);
+	}
+
+
+
+	void add_commands() {
+	 
+		Sforeign_symbol("d2d_matrix_identity", static_cast<ptr>(d2d_matrix_identity));
+		Sforeign_symbol("d2d_matrix_rotate", static_cast<ptr>(d2d_matrix_rotate));
+		Sforeign_symbol("d2d_render_sprite", static_cast<ptr>(d2d_render_sprite));
+		Sforeign_symbol("d2d_render_sprite_rotscale", static_cast<ptr>(d2d_render_sprite_rotscale));
+		Sforeign_symbol("d2d_render_sprite_sheet", static_cast<ptr>(d2d_render_sprite_sheet));
+		Sforeign_symbol("d2d_render_sprite_sheet_rot_scale", static_cast<ptr>(d2d_render_sprite_sheet_rot_scale));
+		Sforeign_symbol("d2d_load_sprites", static_cast<ptr>(d2d_load_sprites));
+		Sforeign_symbol("d2d_write_text", static_cast<ptr>(d2d_write_text));
+		Sforeign_symbol("d2d_set_font", static_cast<ptr>(d2d_set_font));
+		Sforeign_symbol("d2d_color", static_cast<ptr>(d2d_color));
+		Sforeign_symbol("d2d_fill_color", static_cast<ptr>(d2d_fill_color));
+		Sforeign_symbol("d2d_rectangle", static_cast<ptr>(d2d_rectangle));
+		Sforeign_symbol("d2d_fill_rectangle", static_cast<ptr>(d2d_fill_rectangle));
+		Sforeign_symbol("d2d_ellipse", static_cast<ptr>(d2d_ellipse));
+		Sforeign_symbol("d2d_fill_ellipse", static_cast<ptr>(d2d_fill_ellipse));
+		Sforeign_symbol("d2d_render", static_cast<ptr>(d2d_render));
+		Sforeign_symbol("d2d_show", static_cast<ptr>(d2d_show));
+		Sforeign_symbol("d2d_release", static_cast<ptr>(d2d_release));
+	}
+
+}

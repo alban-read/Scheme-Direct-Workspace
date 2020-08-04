@@ -58,7 +58,7 @@ There are examples (fern, tree) in the scripts folder; if you drag and drop one 
 
 #### <a name="graphics-functions">Graphics functions</a>
 
-Use the GDI+ library; a software based; alpha blending graphics library.
+Use the Direct2D library; a hardware accelerated; alpha blending graphics library.
 
 - Use Image Layout to display the graphics pane; your graphics commands will be displayed there.
 
@@ -113,6 +113,8 @@ Lets not judge one other.
 ## <a name="the-escape-key">Escape key handler </a>
 
 *Be mindful; that some code can run away; and never stop; which may require you to kill the app.*
+
+*Animations running in the timer loop do not tolerate interruption; stop them with (stop-every).*
 
 The app now simulates a user typing control-c into a terminal when the escape key is pressed.
 

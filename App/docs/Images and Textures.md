@@ -1,251 +1,95 @@
  [Index](welcome.html)  
 
-# Images and Textures for animation
+# Images and Textures 
 
-In the animation section we moved some circles; circles are pretty simple; and we just drew each one.
+Sprites are the classic name of small images that can be moved around a screen.
 
-Drawing each one is probably not the fastest way to move lots of circles around the screen.
+A sprite is loaded from a file into a memory bank and then displayed at a position on the screen.
 
-This topic discusses how to display things more quickly.
+The image file formats understood are JPEG and PNG files.
 
-- There is some support for images and textures in GDI+; where a texture is a brush that uses an image.
-- And images can be drawn into the display in a couple of different ways.
+Transparency is critical to sprites; in this case the alpha channel is used; where 0.0 is transparent.
 
-As a starting point we can try just drawing the circles; as in the animation topic.
-
-```Scheme
-(paper 0 0 0 255)
-(clr 800 600)
-
-(define draw-a-circle 
- (lambda (x y) 
-	(fill 200 0 0 128)
-	(colour 200 0 0 255)
-	(pen-width 1.5)
-	(fill-ellipse x y 50 50)
-	(draw-ellipse x y 50 50)))
-
-(time 
- (dotimes 10000 
-   (draw-a-circle (random 800)(random 600))))
-
-(show)
-
-```
-
-The time command prints results on the transcript.
-
-The results for me are around 0.31 - 0.32 which seems quick.
-
-#### Creating a new image from a drawing
+### Load Sprites
 
 ```Scheme
-(paper 0 0 0 255)
-(clr 800 600)
+(load-sprites "c:/images/A1.png" 10)	
+(draw-sprite 10 100.0 100.0)
+(show 1)	
 ```
 
-Create a blank surface first; as this also initializes various drawing routines for us.
+Will load a sprite into sprite bank 10 and display the whole thing.
+
+### Drawing Sprites
+
+Sprites are drawn entirely (or partially from a sheet.)
 
 ```Scheme
-(define red-circle
- (begin
-	(activate-bitmap (make-new-bitmap 64 64))
-	(fill 200 0 0 128)
-	(colour 200 0 0 255)
-	(pen-width 1.5)
-	(fill-ellipse 0 0 50 50)
-	(draw-ellipse 0 0 50 50)
-	(clone-image (get-active) )))
+ (draw-sprite 10 100.0 100.0)
 ```
 
-This is a function that creates an image of a red circle.
+Will draw all of the sprite in bank 10 on the screen at position 100.0,100.0
 
-The way we do this is to create a small bitmap; and activate it; so the drawing commands will now draw onto it.
-
-Then we draw the circle onto it; setting the fill and pen colours; then filling the ellipse and drawing its edge.
-
-lastly we copy the image back out of the active surface and assign it as red circle.
+Direct2D can rotate and scale a sprite for us.
 
 ```Scheme
-(show)
+(draw-scaled-rotated-sprite 10 200.0 200.0 45.0 1.5)  
+(show 1)
 ```
 
-It is interesting to show the image now; the display will be a checkerboard; with our transparent circle drawn in the top left corner.  That is because our background is transparent.
+### Drawing from a sprite sheet
+
+The render-sprite function displays a sprite picked out from a sprite sheet.
+
+You do this by choosing which part of the sheet to draw; and where to draw it.
+
+For this you need the destination and the source rectangles.
 
 ```Scheme
-(paper 0 0 0 255)
-(clr 800 600)
-(show)
-
+(render-sprite 
+ 	;; use sprite sheet in bank 12
+ 	12
+ 	;; draw at 100.0,100.0 size 32.0, 32.0
+ 	100.0 100.0 32.0 32.0 
+    ;; from 
+    130.0 130.0 128.0 128.0
+ 	;;
+ 	1.0)
 ```
 
-Now we have an image of a red circle; we can draw it 10000 times and time that.
+A sprite sheet is a larger image; that contains many smaller images; typically but not required to be; in an orderly arrangement; imagine that you have an explosion to animate; and each frame is a 128 by 128 image. You can place them in single explosions.png file; on a 130 by 130 grid of rows and columns.
 
-```
-(time
- (dotimes 10000
-  (draw-image red-circle (random 800) (random 600))))
-(show)
-```
+If the destination size is different to the source size; the image is scaled up or down.
 
-This is one and a half times as fast at 0.23-024.
+### Keyboard 
 
-### Drawing using a texture
+You can read the keypresses made by "the player" in the image pane. 
 
-We can  turn the image into a texture; which can be used as a brush.
+Useful if you are writing a game.
+
+The command is :-
 
 ```Scheme
-(texture red-circle)
+(graphics-keys)
+=> ((recent . 2703) (key . 0) (space . #f) (ctrl . #f) (down . #f) (up . #f) (right . #f) (left . #f))
+
 ```
 
-This is especially fast when you have lots of identical images; you need to draw all the red circles; then all the green circles etc.
+Which returns an association list; the recent field is how long ago the key was pressed.
 
-```Scheme
+The other items are fairly self evident.
 
-(paper 0 0 0 255)
-(clr 800 600)
-(show)
-
-;; draw the red-circle textures and display them
-(dotimes 1000
- (brush-rect (random 800) (random 600) 60 60))
-
-(show)
-```
-
-That did seem; quick - but lets compare and measure it; using the time function.
-
-```Scheme
-(time
- (dotimes 10000
-  (brush-rect (random 800) (random 600) 60 60)))
-```
-
-I get 0.11 - 0.12 for the pure drawing of 10000 circles by using them as a brush.
-
-This is nearly three times faster than just drawing them; although significantly less flexible.
-
-The more complicated a thing is we want to draw 10,000 of - the better the pay back should be.
-
-#### Convenience functions
-
-As we have seen textures are much faster to plot than images.
-
-The difference is quite dramatic when you start moving a lot of sprites on a screen.
-
-Some convenience functions are provided for creating and switching between images
-
- The rect-blit function takes the id; and blits the texture with the id into the active surface.
-
-This allows you to load many different images and display them; reasonably rapidly.
-
-The textures are held in an array on the C side; you can make a thousand of them; which is more than I ever need; you can always recompile the code; to add some more.
+This can be used inside a step function; to control a game with the keyboard.
 
 
 
-```Scheme
+**Stand alone player**
 
-(clr 800 600)
+Actually using a game in the image pane; is not ideal; although it is nice for writing a game.
 
-(define circlecount 800)
+Note that if you do find yourself writing an interesting animation or game; there is a single window 'player' app that runs most of these same commands and also includes sound playback.
 
-(define make-circle-texture
- (lambda (c)
-    (activate-bitmap (make-new-bitmap 64 64))
-    (apply fill (append c '(128)))
-    (apply colour (append c '(255)))
-    (pen-width 1.5)
-    (fill-ellipse 0 0 50 50)
-    (draw-ellipse 0 0 50 50)
-    (make-texture (clone-image (get-active)))))
+https://github.com/alban-read/Scheme-Direct
 
-
-(clear-all-textures)
-(dotimes circlecount
- (make-circle-texture (list (random 255)(random 255)(random 255))))
- 
- ;; instead of a random colour the circle now has a random texture id.
- (define newcircle
-  (lambda ()
-    (list
-      (list (random 800) (random 600))
-      (list (- 5 (random 10)) (- 5 (random 10)))
-      (list (random circlecount)))))
- 
-
-;; make n new circles
-(define newcircles 
-  (lambda (n) 
-	(let ([l '()])
-	  (dotimes n 
-		(set! l (append l (list (newcircle))))) l)))
-
-;; keep a list of circles
-(define circles 
-  (newcircles circlecount))
-
-;; unjam any circle that is stuck	
-(define unstickv 
- (lambda (v) 
-	(list (if (= (car v) 0) (- 5 (random 10)) (car v))
-		  (if (= (cadr v) 0) (- 5 (random 10)) (cadr v))))) 
-
-(define count-offscreen
- (lambda ()
-	(let ([count 0])
-	 (for e in circles 
-	  (when 
-		(or 
-		 (> (caar e) 800) 
-		 (< (caar e) 0)
-		 (> (cadar e) 600) 
-		 (< (cadar e) 0))
-			(set! count (+ count 1))))  count ))) 
-			
-(define all-off 
-	(lambda ()
-	 (>= (count-offscreen) circlecount)))
-
-
-
-;; move all circles
-(define move-circles
- (lambda (c)
- (list (map + (car c)(cadr c)) (unstickv (cadr c)) (caddr c))))
-
-;; draw a circle; by displaying its texture
-(define drawcirc
- (lambda (c) 
-    (apply rect-blit (append (caddr c) (car c) (list 52 52)))))
- 
-
-;; perform one step
-(define circle-step
- (lambda ()
-	(fill 0 0 0 255)
-	(fill-rect 0 0 800 600)
-	(map drawcirc circles)
-	(when (all-off) 
-		(set! circles 
-			(newcircles circlecount)))
-	(set! circles (map move-circles circles))))
- 
-;; timer refresh
-(set-repaint-timer 60)
-
-;; run circle step on the repeating timer.
-(set-every-function 1000 60 0 
-		(lambda ()
-		  (circle-step)(gc)))
-
- 
-```
-
-
-
-This version uses textures for the circles.
-
-It uses much less CPU time than the original version; but seems less colourful; and puzzlingly less smooth.
-
-
+So once completed; you could package and run your final script in a single player window; instead of this entire workspace.
 

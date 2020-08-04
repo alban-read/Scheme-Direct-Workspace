@@ -5,11 +5,12 @@ This is a windows workspace for Chez Scheme.
 
 Provides a simple alternative to a terminal; creates a workspace type interface; that prevents text rushing off the screen;  keeps results and output into a different pane than the script source.
 
-Uses tiled panes rather than overlapping windows; there are several standard view combinations that rearrange the panes.
+- Uses tiled panes rather than overlapping windows; there are several standard view combinations that rearrange the panes.
 
-Provides a graphical output pane.
+- Provides a graphical output pane. 
+  - In this version Direct2D is used for hardware acceleration.
+- I use versions of this application to write apps that script dozens of C libraries; Chez Scheme is very good at that.
 
-I use versions of this application to write apps that script dozens of C libraries; Chez Scheme is very good at that.
 
 ## Fun things
 
@@ -31,9 +32,7 @@ There are other variants of this idea; that are modern browser/web view integrat
 
 
 ## Selfie 
-![a selfie](https://github.com/alban-read/Scheme-Windows-Workspace/blob/master/Graphics.png)
-
-
+<img src="assets\selfie.png">
 
 ## Chez Scheme
 
