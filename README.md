@@ -9,6 +9,7 @@ Provides a simple alternative to a terminal; creates a workspace type interface;
 
 - Provides a graphical output pane. 
   - In this version Direct2D is used for hardware acceleration.
+  
 - I use versions of this application to write apps that script dozens of C libraries; Chez Scheme is very good at that.
 
 
@@ -17,7 +18,7 @@ Interactively editing an animation or a 2D game while it is still running.
 
 You can work through the online Scheme programming book; executing the examples as you go.
 
-## Win32 version
+## Win32 Direct2D version
 
 This is the conventional win32 version of a workspace for running scheme.
 
@@ -29,11 +30,15 @@ There are other variants of this idea; that are modern browser/web view integrat
 
 ## Requires Windows 10 64bit.
 
-
-
-
 ## Selfie 
 <img src="assets/Selfie.png.png">
+
+## Related Projects
+
+There is also a Direct2D player application.
+
+There is another version of this work-space; that uses GDI+.
+
 
 ## Chez Scheme
 
