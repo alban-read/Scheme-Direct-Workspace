@@ -13,6 +13,7 @@ Provides a simple alternative to a terminal; creates a workspace type interface;
 
 
 ## Fun things
+Interactively editing an animation or a 2D game while it is still running.
 
 You can work through the online Scheme programming book; executing the examples as you go.
 
