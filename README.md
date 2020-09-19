@@ -1,7 +1,7 @@
 # Scheme-Windows-Workspace
 This is a windows workspace for Chez Scheme.
 
-(Latest version is over here)[https://github.com/alban-read/Scheme-Windows-Tiled-Shell]
+[Latest version is over here](https://github.com/alban-read/Scheme-Windows-Tiled-Shell)
 
 ## Reason
 
